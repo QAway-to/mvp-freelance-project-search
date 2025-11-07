@@ -84,32 +84,79 @@ freelance-mvp/
 └── requirements.txt
 ```
 
-## 🔧 Настройка деплоя на Render
+## 🔧 Настройка деплоя на Railway
 
 ### 1. Создание аккаунта
-Перейдите на [render.com](https://render.com) и зарегистрируйтесь.
+Перейдите на [railway.app](https://railway.app) и зарегистрируйтесь через GitHub.
 
-### 2. Создание веб-сервиса
-1. Нажмите "New" → "Web Service"
-2. Подключите ваш GitHub репозиторий
-3. Настройте параметры:
-   - **Runtime**: Python 3
-   - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `python main.py`
-   - **Environment Variables**: Добавьте переменные из `.env`
+### 2. Создание проекта
+1. Нажмите "New Project"
+2. Выберите "Deploy from GitHub repo"
+3. Подключите ваш GitHub репозиторий (`agent-a-kwork-mvp`)
+4. Railway автоматически определит Python проект и начнет деплой
 
-### 3. Дополнительные настройки
-- **Plan**: Starter ($7/месяц) для постоянной работы
-- **Region**: Выберите ближайший
-- **Health Check**: `/status`
+### 3. Настройка переменных окружения
+В настройках проекта (Variables) добавьте все переменные из `env.example`:
 
-### 4. Переменные окружения
-В настройках сервиса добавьте:
-```
-MODE=demo
-LOG_LEVEL=INFO
+```bash
+# Обязательные
+MODE=demo  # или full для реального использования
 SEARCH_KEYWORD=бот
+
+# Опциональные (для полной интеграции)
+N8N_WEBHOOK_URL=https://your-n8n-instance.com/webhook/freelance-project
+TELEGRAM_BOT_TOKEN=your_token
+TELEGRAM_CHANNEL_ID=@your_channel
+
+# Для full режима
+KWORK_EMAIL=your_email@kwork.ru
+KWORK_PASSWORD=your_password
 ```
+
+### 4. Автоматический деплой
+- Railway автоматически деплоит при каждом push в main ветку
+- Логи доступны в Railway Dashboard
+- Health check endpoint: `/health`
+- Status endpoint: `/status`
+
+### 5. Получение URL
+После деплоя Railway предоставит публичный URL вашего сервиса:
+- Dashboard: `https://your-app.railway.app/`
+- API: `https://your-app.railway.app/status`
+
+## 🔗 Интеграция с n8n (Agent B)
+
+Agent A автоматически отправляет подходящие проекты в n8n workflow через webhook.
+
+### Настройка n8n workflow:
+
+1. **Создайте webhook в n8n:**
+   - Добавьте ноду "Webhook"
+   - Скопируйте URL webhook
+   - Добавьте его в Railway переменные: `N8N_WEBHOOK_URL`
+
+2. **Структура данных, отправляемых в n8n:**
+```json
+{
+  "project_id": "demo_1",
+  "title": "Создать Telegram бота...",
+  "description": "Описание проекта...",
+  "budget": "15 000 ₽",
+  "url": "https://kwork.ru/projects/...",
+  "evaluation": {
+    "score": 0.87,
+    "reasons": ["Bot-related keywords found", ...],
+    "suitable": true
+  },
+  "found_at": "2025-11-07T21:40:00",
+  "status": "pending_review"
+}
+```
+
+3. **API endpoints для управления:**
+   - `POST /webhook/n8n` - Управление агентом из n8n (start/stop)
+   - `GET /status` - Статус агента
+   - `GET /health` - Health check
 
 ## 📊 Dashboard
 
@@ -158,7 +205,7 @@ SEARCH_KEYWORD=бот
 Логи доступны:
 - В терминале (локально)
 - В веб-dashboard (real-time)
-- В Render logs (при деплое)
+- В Railway logs (при деплое)
 
 ## 🔄 Рабочие режимы
 

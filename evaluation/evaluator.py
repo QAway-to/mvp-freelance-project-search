@@ -49,12 +49,19 @@ class ProjectEvaluator:
         words = set(cleaned_text.split())
 
         matches = len(words.intersection(keywords))
-        total_keywords = len(keywords)
 
-        if total_keywords == 0:
-            return 0.0
+        # Score based on number of matches, not percentage of total keywords
+        # Max score = weight when we find 3+ matches
+        if matches >= 3:
+            score = weight
+        elif matches == 2:
+            score = weight * 0.7
+        elif matches == 1:
+            score = weight * 0.4
+        else:
+            score = 0.0
 
-        return (matches / total_keywords) * weight
+        return score
 
     def has_negative_keywords(self, text: str) -> bool:
         """Check if text contains negative keywords"""
@@ -110,8 +117,8 @@ class ProjectEvaluator:
         if self.has_negative_keywords(full_text):
             return 0.0, ["Contains negative keywords (design, text, etc.)"]
 
-        # Bot-related keywords (weight: 0.5)
-        bot_score = self.calculate_keyword_score(full_text, self.bot_keywords, 0.5)
+        # Bot-related keywords (weight: 0.6 - most important)
+        bot_score = self.calculate_keyword_score(full_text, self.bot_keywords, 0.6)
         score += bot_score
 
         if bot_score > 0:
@@ -124,21 +131,18 @@ class ProjectEvaluator:
         if tech_score > 0:
             reasons.append(f"Technical keywords found ({tech_score:.2f})")
 
-        # Budget evaluation (weight: 0.2)
-        budget_score = self.evaluate_budget(budget) * 0.2
+        # Budget evaluation (weight: 0.1)
+        budget_score = self.evaluate_budget(budget) * 0.1
         score += budget_score
 
         if budget_score > 0:
             reasons.append(f"Reasonable budget ({budget_score:.2f})")
 
-        # Length check - prefer detailed descriptions
+        # Length bonus - prefer detailed descriptions
         text_length = len(full_text)
         if text_length > 100:
-            score += 0.1
+            score += 0.05
             reasons.append("Detailed description")
-        elif text_length < 50:
-            score -= 0.1
-            reasons.append("Too short description")
 
         # Ensure score is between 0 and 1
         score = max(0.0, min(1.0, score))

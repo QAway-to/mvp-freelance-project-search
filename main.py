@@ -1,4 +1,5 @@
 import asyncio
+import os
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -79,11 +80,35 @@ async def get_status():
         "projects_found": len(agent_a.found_projects)
     }
 
+@app.post("/webhook/n8n")
+async def n8n_webhook(request: Request):
+    """Webhook endpoint for n8n to trigger agent actions"""
+    try:
+        data = await request.json()
+        action = data.get("action", "")
+        
+        if action == "start":
+            asyncio.create_task(agent_a.run_continuous())
+            return {"status": "started", "message": "Agent A started via n8n webhook"}
+        elif action == "stop":
+            await agent_a.stop()
+            return {"status": "stopped", "message": "Agent A stopped via n8n webhook"}
+        else:
+            return {"status": "error", "message": f"Unknown action: {action}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Railway"""
+    return {"status": "healthy", "service": "agent-a"}
+
 if __name__ == "__main__":
+    port = int(os.getenv("PORT", 8000))
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8000,
-        reload=True,
+        port=port,
+        reload=False,  # Disable reload in production
         log_level=config.LOG_LEVEL.lower()
     )

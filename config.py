@@ -2,7 +2,11 @@ import os
 from typing import Optional
 from dotenv import load_dotenv
 
-load_dotenv()
+# Try to load .env file, but don't fail if it doesn't exist
+try:
+    load_dotenv()
+except:
+    pass
 
 class Config:
     # App settings
@@ -21,10 +25,13 @@ class Config:
     # Telegram
     TELEGRAM_BOT_TOKEN: Optional[str] = os.getenv('TELEGRAM_BOT_TOKEN')
     TELEGRAM_CHANNEL_ID: Optional[str] = os.getenv('TELEGRAM_CHANNEL_ID')
+    
+    # n8n Integration
+    N8N_WEBHOOK_URL: Optional[str] = os.getenv('N8N_WEBHOOK_URL')
 
     # Search limits
     MAX_PROJECTS_PER_SESSION: int = int(os.getenv('MAX_PROJECTS_PER_SESSION', '5'))
-    EVALUATION_THRESHOLD: float = float(os.getenv('EVALUATION_THRESHOLD', '0.7'))
+    EVALUATION_THRESHOLD: float = float(os.getenv('EVALUATION_THRESHOLD', '0.4'))
 
     # Timing (seconds)
     SESSION_DURATION_MAX: int = int(os.getenv('SESSION_DURATION_MAX', '300'))

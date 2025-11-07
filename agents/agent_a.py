@@ -2,6 +2,7 @@ import asyncio
 import time
 from datetime import datetime
 from typing import List, Dict, Any
+import aiohttp
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -32,6 +33,12 @@ class AgentA:
         """Setup stealth browser"""
         log_agent_action("Agent A", "Setting up stealth browser")
 
+        if config.MODE == "demo":
+            # In demo mode, skip browser setup entirely
+            log_agent_action("Agent A", "Demo mode: skipping browser setup")
+            self.driver = None
+            return
+
         options = Options()
 
         # Basic options
@@ -53,18 +60,31 @@ class AgentA:
         if config.MODE == "demo":
             options.add_argument("--headless")
 
-        # Create driver
-        service = Service(ChromeDriverManager().install())
-        self.driver = webdriver.Chrome(service=service, options=options)
+        # Create driver - let Selenium Manager handle it
+        try:
+            # Selenium 4.15+ has built-in manager
+            self.driver = webdriver.Chrome(options=options)
+        except Exception as e:
+            log_agent_action("Agent A", f"Chrome driver setup failed: {e}")
+            # Try with explicit service
+            try:
+                service = Service()
+                self.driver = webdriver.Chrome(service=service, options=options)
+            except Exception as e2:
+                log_agent_action("Agent A", f"Service setup also failed: {e2}")
+                raise Exception("Could not setup Chrome driver")
 
         # Apply stealth
-        stealth(self.driver,
-                languages=["en-US", "en"],
-                vendor="Google Inc.",
-                platform="Win32",
-                webgl_vendor="Intel Inc.",
-                renderer="Intel Iris OpenGL Engine",
-                fix_hairline=True)
+        try:
+            stealth(self.driver,
+                    languages=["en-US", "en"],
+                    vendor="Google Inc.",
+                    platform="Win32",
+                    webgl_vendor="Intel Inc.",
+                    renderer="Intel Iris OpenGL Engine",
+                    fix_hairline=True)
+        except Exception as e:
+            log_agent_action("Agent A", f"Stealth setup failed: {e}")
 
         log_agent_action("Agent A", "Browser setup complete")
 
@@ -86,20 +106,95 @@ class AgentA:
 
         log_agent_action("Agent A", f"Simulating reading for {duration} seconds")
 
-        # Scroll to simulate reading
-        scroll_steps = min(5, duration // 2)
-        for i in range(scroll_steps):
-            try:
-                self.driver.execute_script("window.scrollBy(0, 200);")
-                time.sleep(duration / scroll_steps)
-            except:
-                break
+        if self.driver:
+            # Scroll to simulate reading
+            scroll_steps = min(5, duration // 2)
+            for i in range(scroll_steps):
+                try:
+                    self.driver.execute_script("window.scrollBy(0, 200);")
+                    time.sleep(duration / scroll_steps)
+                except:
+                    break
 
         time.sleep(duration % 2)  # Remaining time
 
     def search_projects(self) -> List[Dict[str, Any]]:
         """Search for projects with keyword"""
         log_agent_action("Agent A", f"Searching projects with keyword: {config.SEARCH_KEYWORD}")
+
+        if config.MODE == "demo":
+            # Demo mode: generate fake projects
+            return self._generate_demo_projects()
+        else:
+            # Full mode: real search on Kwork
+            return self._search_real_projects()
+
+    def _generate_demo_projects(self) -> List[Dict[str, Any]]:
+        """Generate fake projects for demo mode"""
+        log_agent_action("Agent A", "Demo mode: generating fake projects")
+
+        # Simulate browser activity (without actual browser)
+        log_agent_action("Agent A", "Demo mode: simulating browser navigation")
+        self.human_delay()
+        self.simulate_reading()
+
+        # Fake projects data - include "бот" keyword for better demo
+        fake_projects = [
+            {
+                "id": "demo_1",
+                "title": "Создать Telegram бота для уведомлений о скидках",
+                "description": "Нужен бот который будет мониторить скидки на сайте и отправлять уведомления пользователям. Требуется опыт работы с Telegram API, Python или Node.js. Бот должен уметь работать с базой данных пользователей.",
+                "budget": "15 000 ₽",
+                "url": "https://kwork.ru/projects/demo_1",
+                "found_at": datetime.now().isoformat()
+            },
+            {
+                "id": "demo_2",
+                "title": "Разработка Discord бота модератора",
+                "description": "Требуется создать бота для Discord сервера. Функционал: автоматическая модерация чата, система предупреждений, логирование действий. Предпочтительно на Python с использованием discord.py",
+                "budget": "8 000 ₽",
+                "url": "https://kwork.ru/projects/demo_2",
+                "found_at": datetime.now().isoformat()
+            },
+            {
+                "id": "demo_3",
+                "title": "Бот для парсинга данных с сайтов",
+                "description": "Нужно разработать бота для автоматического сбора информации с нескольких сайтов. Обработка HTML, сохранение в базу данных. Защита от блокировок, ротация прокси. Бот должен работать автономно.",
+                "budget": "25 000 ₽",
+                "url": "https://kwork.ru/projects/demo_3",
+                "found_at": datetime.now().isoformat()
+            },
+            {
+                "id": "demo_4",
+                "title": "Умный бот для обработки заказов",
+                "description": "Создать бота который будет автоматически обрабатывать заказы с сайта. Интеграция с платежными системами, отправка уведомлений клиентам. Бот должен быть умным и адаптивным.",
+                "budget": "20 000 ₽",
+                "url": "https://kwork.ru/projects/demo_4",
+                "found_at": datetime.now().isoformat()
+            },
+            {
+                "id": "demo_5",
+                "title": "Создать чатбот для сайта на JavaScript",
+                "description": "Интегрировать чатбот на сайт компании. Бот должен отвечать на типичные вопросы, собирать контакты, передавать информацию менеджеру. Использовать Dialogflow или аналог.",
+                "budget": "12 000 ₽",
+                "url": "https://kwork.ru/projects/demo_5",
+                "found_at": datetime.now().isoformat()
+            }
+        ]
+
+        # Simulate finding projects with delays
+        found_projects = []
+        for i, project in enumerate(fake_projects[:config.MAX_PROJECTS_PER_SESSION]):
+            log_agent_action("Agent A", f"Found demo project: {project['title'][:50]}...")
+            found_projects.append(project)
+            self.human_delay(1, 3)  # Simulate processing time
+
+        log_agent_action("Agent A", f"Demo search complete: {len(found_projects)} projects generated")
+        return found_projects
+
+    def _search_real_projects(self) -> List[Dict[str, Any]]:
+        """Real search on Kwork"""
+        log_agent_action("Agent A", "Real search mode: accessing Kwork")
 
         # Navigate to search URL
         search_url = f"{config.KWORK_PROJECTS_URL}?query={config.SEARCH_KEYWORD}"
@@ -200,6 +295,9 @@ class AgentA:
                     # Send to Telegram if configured
                     if self.telegram:
                         asyncio.create_task(self.telegram.send_project_notification(project))
+                    
+                    # Send to n8n workflow (Agent B)
+                    asyncio.create_task(self.send_to_n8n(project))
                 else:
                     log_agent_action("Agent A", f"❌ Not suitable: {project['title'][:50]} (score: {score:.2f})")
 
@@ -210,6 +308,37 @@ class AgentA:
 
         # Summary
         log_agent_action("Agent A", f"Session complete: {len(suitable_projects)} suitable projects found")
+
+    async def send_to_n8n(self, project: Dict[str, Any]):
+        """Send suitable project to n8n workflow (Agent B)"""
+        if not config.N8N_WEBHOOK_URL:
+            log_agent_action("Agent A", "n8n webhook URL not configured - skipping")
+            return
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                payload = {
+                    "project_id": project.get("id"),
+                    "title": project.get("title"),
+                    "description": project.get("description"),
+                    "budget": project.get("budget"),
+                    "url": project.get("url"),
+                    "evaluation": project.get("evaluation", {}),
+                    "found_at": project.get("found_at"),
+                    "status": "pending_review"  # Waiting for manual approval
+                }
+
+                async with session.post(
+                    config.N8N_WEBHOOK_URL,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    if response.status == 200:
+                        log_agent_action("Agent A", f"✅ Project sent to n8n: {project['title'][:50]}...")
+                    else:
+                        log_agent_action("Agent A", f"⚠️ n8n webhook returned status {response.status}")
+        except Exception as e:
+            log_agent_action("Agent A", f"❌ Error sending to n8n: {str(e)}")
 
     async def run_session(self):
         """Run one search session"""
@@ -268,5 +397,5 @@ class AgentA:
             try:
                 self.driver.quit()
                 self.driver = None
-            except:
-                pass
+            except Exception as e:
+                log_agent_action("Agent A", f"Error closing driver: {e}")
