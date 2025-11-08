@@ -291,7 +291,7 @@ class AgentA:
             project_info_list = []
             filtered_count = 0
             log_agent_action("Agent A", "📋 [SELENIUM] Collecting project URLs and titles from list page...")
-            log_agent_action("Agent A", f"🔍 [FILTER] Applying preliminary relevance filter based on: {', '.join(config.SEARCH_KEYWORDS_LIST)}")
+            log_agent_action("Agent A", f"🔍 [FILTER] Applying soft filter (only removes obviously irrelevant: лифт, дизайн, текст, etc.)")
             
             for i, link_element in enumerate(project_elements):
                 try:
