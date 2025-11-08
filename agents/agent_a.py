@@ -167,7 +167,7 @@ class AgentA:
                 "title": "Создать Telegram бота для уведомлений о скидках",
                 "description": "Нужен бот который будет мониторить скидки на сайте и отправлять уведомления пользователям. Требуется опыт работы с Telegram API, Python или Node.js. Бот должен уметь работать с базой данных пользователей. Необходимо реализовать систему подписок, настройку фильтров по категориям товаров, отправку уведомлений в реальном времени. Также требуется интеграция с популярными маркетплейсами для мониторинга цен.",
                 "budget": "15 000 ₽",
-                "url": "https://kwork.ru/projects/1234567",
+                "url": "https://kwork.ru/projects/1234567/view",
                 "proposals": 8,
                 "hired": 0,
                 "found_at": datetime.now().isoformat()
@@ -177,7 +177,7 @@ class AgentA:
                 "title": "Разработка Discord бота модератора",
                 "description": "Требуется создать бота для Discord сервера. Функционал: автоматическая модерация чата, система предупреждений, логирование действий. Предпочтительно на Python с использованием discord.py. Бот должен уметь автоматически удалять спам, блокировать пользователей за нарушения, вести статистику активности участников. Также нужна система ролей и автоматическая выдача прав на основе активности.",
                 "budget": "8 000 ₽",
-                "url": "https://kwork.ru/projects/2345678",
+                "url": "https://kwork.ru/projects/2345678/view",
                 "proposals": 12,
                 "hired": 1,
                 "found_at": datetime.now().isoformat()
@@ -187,7 +187,7 @@ class AgentA:
                 "title": "Бот для парсинга данных с сайтов",
                 "description": "Нужно разработать бота для автоматического сбора информации с нескольких сайтов. Обработка HTML, сохранение в базу данных. Защита от блокировок, ротация прокси. Бот должен работать автономно. Требуется реализовать механизм обхода антибот защиты, обработку различных форматов данных (JSON, XML, HTML), экспорт в различные форматы. Необходима система уведомлений об ошибках и статусе работы бота.",
                 "budget": "25 000 ₽",
-                "url": "https://kwork.ru/projects/3456789",
+                "url": "https://kwork.ru/projects/3456789/view",
                 "proposals": 5,
                 "hired": 0,
                 "found_at": datetime.now().isoformat()
@@ -197,7 +197,7 @@ class AgentA:
                 "title": "Умный бот для обработки заказов",
                 "description": "Создать бота который будет автоматически обрабатывать заказы с сайта. Интеграция с платежными системами, отправка уведомлений клиентам. Бот должен быть умным и адаптивным. Необходимо реализовать обработку различных типов заказов, автоматическое формирование счетов, интеграцию с CRM системами. Бот должен уметь обрабатывать возвраты, отмены заказов, автоматически отправлять трекинг номера клиентам.",
                 "budget": "20 000 ₽",
-                "url": "https://kwork.ru/projects/4567890",
+                "url": "https://kwork.ru/projects/4567890/view",
                 "proposals": 15,
                 "hired": 2,
                 "found_at": datetime.now().isoformat()
@@ -207,7 +207,7 @@ class AgentA:
                 "title": "Создать чатбот для сайта на JavaScript",
                 "description": "Интегрировать чатбот на сайт компании. Бот должен отвечать на типичные вопросы, собирать контакты, передавать информацию менеджеру. Использовать Dialogflow или аналог. Требуется красивое оформление чатбота в стиле сайта, возможность настройки диалогов через админ панель, интеграция с мессенджерами (Telegram, WhatsApp). Также нужна аналитика разговоров и статистика по наиболее частым вопросам.",
                 "budget": "12 000 ₽",
-                "url": "https://kwork.ru/projects/5678901",
+                "url": "https://kwork.ru/projects/5678901/view",
                 "proposals": 20,
                 "hired": 0,
                 "found_at": datetime.now().isoformat()
@@ -268,6 +268,14 @@ class AgentA:
                     # Extract project data
                     title = link_element.text.strip()
                     url = link_element.get_attribute("href")
+                    # Ensure URL has /view suffix for correct endpoint
+                    if url and '/projects/' in url and not url.endswith('/view'):
+                        # Remove query parameters if any
+                        if '?' in url:
+                            url = url.split('?')[0]
+                        # Add /view if not present
+                        if not url.endswith('/view'):
+                            url = url + '/view'
                     log_agent_action("Agent A", f"📄 [SELENIUM] Title: {title[:50]}...")
 
                     # Get description (usually in the same container)
@@ -437,10 +445,19 @@ class AgentA:
                         hired = 0
 
                     # Extract project ID from URL (real ID, not demo_)
-                    project_id = url.split('/')[-1].split('?')[0] if '/' in url else str(i)
-                    # Remove any query parameters
-                    if '?' in project_id:
-                        project_id = project_id.split('?')[0]
+                    # URL format: https://kwork.ru/projects/1234567/view
+                    if '/' in url:
+                        # Split by / and get the ID (second to last part if /view exists)
+                        url_parts = url.split('/')
+                        # Remove query parameters from last part
+                        last_part = url_parts[-1].split('?')[0]
+                        # If last part is 'view', get the previous part as ID
+                        if last_part == 'view' and len(url_parts) >= 2:
+                            project_id = url_parts[-2].split('?')[0]
+                        else:
+                            project_id = last_part.split('?')[0]
+                    else:
+                        project_id = str(i)
 
                     project_data = {
                         "id": project_id,
