@@ -36,43 +36,45 @@ async def dashboard(request: Request):
 
 @app.get("/logs/stream")
 async def stream_logs():
-    """Server-Sent Events for real-time logs"""
+    """Server-Sent Events for real-time logs - optimized for streaming"""
     async def event_generator():
         while True:
             try:
-                # Check queue for messages - read all available messages immediately
-                messages_sent = 0
-                max_messages_per_iteration = 100  # Limit to prevent overwhelming
+                # Rapidly read all available messages from queue
+                batch = []
+                max_batch = 200  # Read up to 200 messages at once
                 
-                while messages_sent < max_messages_per_iteration:
+                # Collect all available messages immediately
+                while len(batch) < max_batch:
                     try:
-                        # Try to get message without waiting (non-blocking)
                         log_message = log_queue.get_nowait()
-                        yield f"data: {log_message}\n\n"
-                        messages_sent += 1
-                        # Very small delay for streaming effect
-                        await asyncio.sleep(0.001)
+                        batch.append(log_message)
                     except asyncio.QueueEmpty:
-                        # No more messages, break and wait
                         break
                 
-                # If we sent messages, continue immediately (don't wait)
-                if messages_sent > 0:
+                # Send all collected messages one by one (for streaming effect)
+                for log_message in batch:
+                    yield f"data: {log_message}\n\n"
+                    # Minimal delay - just enough to allow browser to process
+                    if len(batch) > 1:
+                        await asyncio.sleep(0.0001)  # Very small delay for streaming
+                
+                # If we sent messages, check again immediately
+                if batch:
                     continue
                 
-                # No messages available, wait a bit then send keepalive
+                # No messages available - wait briefly for new messages
                 try:
-                    # Wait with timeout for new message
-                    log_message = await asyncio.wait_for(log_queue.get(), timeout=0.05)
+                    log_message = await asyncio.wait_for(log_queue.get(), timeout=0.01)
                     yield f"data: {log_message}\n\n"
                 except asyncio.TimeoutError:
                     # Send keepalive to maintain connection
                     yield f": keepalive\n\n"
-                    await asyncio.sleep(0.1)  # Short wait before next check
+                    await asyncio.sleep(0.05)  # Very short wait
                     
             except Exception as e:
                 yield f"data: {{\"error\": \"{str(e)}\"}}\n\n"
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.1)
 
     return StreamingResponse(
         event_generator(),
