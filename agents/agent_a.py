@@ -572,17 +572,22 @@ class AgentA:
 
     def evaluate_and_notify(self, projects: List[Dict[str, Any]]):
         """Evaluate projects and send notifications"""
-        log_agent_action("Agent A", f"📊 [EVALUATION] Starting evaluation of {len(projects)} projects...")
+        total_projects = len(projects)
+        log_agent_action("Agent A", f"📊 [EVALUATION] Starting evaluation of {total_projects} projects...")
         log_agent_action("Agent A", f"📊 [EVALUATION] Threshold: {config.EVALUATION_THRESHOLD}")
+        log_agent_action("Agent A", f"⏱️ [EVALUATION] This may take 1-2 minutes per project (AI evaluation)")
 
         suitable_projects = []
 
         for i, project in enumerate(projects):
             try:
-                log_agent_action("Agent A", f"📊 [EVALUATION] Evaluating project {i+1}/{len(projects)}: {project['title'][:50]}...")
+                project_num = i + 1
+                log_agent_action("Agent A", f"📊 [EVALUATION] ====== Evaluating project {project_num}/{total_projects} ======")
+                log_agent_action("Agent A", f"📋 [EVALUATION] Title: {project['title'][:80]}...")
+                log_agent_action("Agent A", f"📝 [EVALUATION] Description length: {len(project.get('description', ''))} chars")
                 
-                # Evaluate relevance
-                score, reasons = self.evaluator.evaluate_project(project)
+                # Evaluate relevance with progress info
+                score, reasons = self.evaluator.evaluate_project(project, project_index=project_num, total_projects=total_projects)
 
                 project["evaluation"] = {
                     "score": score,
@@ -590,31 +595,34 @@ class AgentA:
                     "suitable": score >= config.EVALUATION_THRESHOLD
                 }
 
-                log_agent_action("Agent A", f"📊 [EVALUATION] Score: {score:.2f}/1.0 | Threshold: {config.EVALUATION_THRESHOLD}")
+                log_agent_action("Agent A", f"📊 [EVALUATION] Project {project_num}/{total_projects} - Score: {score:.2f}/1.0 | Threshold: {config.EVALUATION_THRESHOLD}")
 
                 if project["evaluation"]["suitable"]:
                     suitable_projects.append(project)
-                    log_agent_action("Agent A", f"✅ [EVALUATION] Project APPROVED: {project['title'][:50]}... (score: {score:.2f})")
-                    log_agent_action("Agent A", f"📋 [EVALUATION] Reasons: {', '.join(reasons[:3])}")
+                    log_agent_action("Agent A", f"✅ [EVALUATION] Project {project_num}/{total_projects} APPROVED: {project['title'][:50]}... (score: {score:.2f})")
+                    log_agent_action("Agent A", f"📋 [EVALUATION] Top reasons: {', '.join(reasons[:2])}")
 
                     # Send to Telegram if configured
                     if self.telegram:
-                        log_agent_action("Agent A", f"📱 [TELEGRAM] Sending notification for project {i+1}...")
+                        log_agent_action("Agent A", f"📱 [TELEGRAM] Sending notification for project {project_num}...")
                         asyncio.create_task(self.telegram.send_project_notification(project))
                     
                     # Send to n8n workflow (Agent B)
-                    log_agent_action("Agent A", f"🔗 [N8N] Sending project {i+1} to n8n workflow...")
+                    log_agent_action("Agent A", f"🔗 [N8N] Sending project {project_num} to n8n workflow...")
                     asyncio.create_task(self.send_to_n8n(project))
                 else:
-                    log_agent_action("Agent A", f"❌ [EVALUATION] Project REJECTED: {project['title'][:50]}... (score: {score:.2f} < {config.EVALUATION_THRESHOLD})")
+                    log_agent_action("Agent A", f"❌ [EVALUATION] Project {project_num}/{total_projects} REJECTED: {project['title'][:50]}... (score: {score:.2f} < {config.EVALUATION_THRESHOLD})")
+
+                log_agent_action("Agent A", f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
             except Exception as e:
-                log_agent_action("Agent A", f"❌ [EVALUATION] Error evaluating project {i+1}: {str(e)}")
+                log_agent_action("Agent A", f"❌ [EVALUATION] Error evaluating project {i+1}: {str(e)[:200]}")
 
         self.found_projects.extend(suitable_projects)
 
         # Summary
-        log_agent_action("Agent A", f"📈 [EVALUATION] Evaluation complete: {len(suitable_projects)}/{len(projects)} projects approved")
+        log_agent_action("Agent A", f"📈 [EVALUATION] ====== Evaluation Complete ======")
+        log_agent_action("Agent A", f"📈 [EVALUATION] Approved: {len(suitable_projects)}/{total_projects} projects")
         log_agent_action("Agent A", f"📈 [EVALUATION] Total suitable projects in history: {len(self.found_projects)}")
 
     async def send_to_n8n(self, project: Dict[str, Any]):

@@ -124,7 +124,7 @@ class ProjectEvaluator:
         except:
             return 0.5
 
-    def evaluate_project(self, project: Dict[str, Any]) -> Tuple[float, List[str]]:
+    def evaluate_project(self, project: Dict[str, Any], project_index: int = 0, total_projects: int = 0) -> Tuple[float, List[str]]:
         """
         Evaluate project relevance using rule-based + AI semantic analysis
         Returns: (score, reasons)
@@ -141,7 +141,10 @@ class ProjectEvaluator:
 
         # Check for negative keywords first - hard filter
         if self.has_negative_keywords(full_text):
+            log_agent_action("Evaluator", f"🚫 [RULE] Project {project_index}/{total_projects} rejected: negative keywords")
             return 0.0, ["❌ Contains negative keywords (design, text, etc.)"]
+
+        log_agent_action("Evaluator", f"📊 [RULE] Starting rule-based evaluation {project_index}/{total_projects}...")
 
         # RULE-BASED EVALUATION (keyword matching)
         rule_score = 0.0
@@ -185,16 +188,20 @@ class ProjectEvaluator:
             rule_score += 0.15
             reasons.append(f"🎯 Contains '{search_keyword}' (+0.15)")
 
-        # AI SEMANTIC EVALUATION (Gemini)
+        log_agent_action("Evaluator", f"✅ [RULE] Rule-based evaluation complete: score={rule_score:.2f}")
+
+        # AI SEMANTIC EVALUATION (Gemini) - with progress info
         ai_score = 0.0
+        log_agent_action("Evaluator", f"🤖 [AI] Starting AI semantic evaluation {project_index}/{total_projects}...")
         try:
-            ai_score, ai_reasons = self.gemini.evaluate_project_semantic(project)
+            ai_score, ai_reasons = self.gemini.evaluate_project_semantic(project, project_index, total_projects)
             if ai_score > 0.1:
                 reasons.extend(ai_reasons)
             else:
                 reasons.append("🤖 AI evaluation: neutral/low relevance")
+            log_agent_action("Evaluator", f"✅ [AI] AI evaluation complete: score={ai_score:.2f}")
         except Exception as e:
-            log_agent_action("Evaluator", f"⚠️ AI evaluation failed: {str(e)}")
+            log_agent_action("Evaluator", f"⚠️ [AI] AI evaluation failed: {str(e)[:100]}")
             reasons.append("🤖 AI evaluation: failed")
 
         # COMBINE SCORES: Rule-based (60%) + AI (40%)
@@ -211,5 +218,7 @@ class ProjectEvaluator:
 
         # Add summary scores
         reasons.insert(0, f"🎯 Final score: {final_score:.2f} (Rule: {rule_score:.2f} + AI: {ai_score:.2f})")
+
+        log_agent_action("Evaluator", f"✅ [EVALUATION] Project {project_index}/{total_projects} evaluation complete: final_score={final_score:.2f}")
 
         return final_score, reasons
