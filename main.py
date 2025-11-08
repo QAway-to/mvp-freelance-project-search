@@ -37,16 +37,28 @@ async def dashboard(request: Request):
 @app.get("/logs")
 async def get_logs():
     """Get current logs as plain text - simple line-by-line approach"""
+    import json
     logs = []
-    max_logs = 500  # Return last 500 log entries
+    max_logs = 1000  # Return last 1000 log entries (increased for better visibility)
 
     # Collect all available logs from queue
     collected = 0
+    temp_logs = []
+    
+    # First, collect all logs into temp list
     while collected < max_logs:
         try:
             log_entry_json = log_queue.get_nowait()
-            # Parse JSON and extract message
-            import json
+            temp_logs.append(log_entry_json)
+            collected += 1
+        except asyncio.QueueEmpty:
+            break
+        except Exception as e:
+            break
+
+    # Parse and format logs (most recent first, then reverse)
+    for log_entry_json in reversed(temp_logs[-max_logs:]):  # Keep only last max_logs
+        try:
             log_entry = json.loads(log_entry_json)
             message = log_entry.get('message', '')
 
@@ -54,12 +66,11 @@ async def get_logs():
             timestamp = log_entry.get('timestamp', '')[:19]  # YYYY-MM-DDTHH:MM:SS
             level = log_entry.get('level', 'INFO')
             logs.append(f"[{timestamp}] {level}: {message}")
-            collected += 1
-        except asyncio.QueueEmpty:
-            break
         except Exception as e:
             logs.append(f"[ERROR] Failed to parse log: {str(e)}")
-            break
+
+    # Reverse to show oldest first (chronological order)
+    logs.reverse()
 
     # Return as plain text with line breaks
     log_text = "\n".join(logs) if logs else "No logs available yet..."

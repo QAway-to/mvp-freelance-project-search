@@ -2,12 +2,36 @@ from typing import Dict, Any, Tuple, List
 import re
 from config import config
 from utils.logger import log_agent_action
-from evaluation.gemini_evaluator import GeminiEvaluator
+
+# Safely import Gemini evaluator - don't fail if module is missing
+try:
+    from evaluation.gemini_evaluator import GeminiEvaluator
+    GEMINI_AVAILABLE = True
+except (ImportError, Exception) as e:
+    # Don't log here - logger may not be initialized yet
+    GEMINI_AVAILABLE = False
+    GeminiEvaluator = None
 
 class ProjectEvaluator:
     def __init__(self):
-        # Initialize Gemini AI evaluator
-        self.gemini = GeminiEvaluator()
+        # Initialize Gemini AI evaluator safely
+        self.gemini = None
+        try:
+            if GEMINI_AVAILABLE and GeminiEvaluator:
+                try:
+                    self.gemini = GeminiEvaluator()
+                    if not self.gemini.initialized:
+                        log_agent_action("Evaluator", "⚠️ Gemini not initialized - using rule-based evaluation only")
+                        self.gemini = None
+                except Exception as e:
+                    log_agent_action("Evaluator", f"⚠️ Failed to initialize Gemini: {str(e)} - continuing without AI")
+                    self.gemini = None
+            else:
+                log_agent_action("Evaluator", "⚠️ Gemini evaluator not available - using rule-based evaluation only")
+        except Exception as e:
+            # Last resort - don't crash
+            self.gemini = None
+            log_agent_action("Evaluator", f"⚠️ Error setting up Gemini: {str(e)} - using rule-based only")
 
         # Keywords for bot-related projects
         self.bot_keywords = {
@@ -192,17 +216,22 @@ class ProjectEvaluator:
 
         # AI SEMANTIC EVALUATION (Gemini) - with progress info
         ai_score = 0.0
-        log_agent_action("Evaluator", f"🤖 [AI] Starting AI semantic evaluation {project_index}/{total_projects}...")
-        try:
-            ai_score, ai_reasons = self.gemini.evaluate_project_semantic(project, project_index, total_projects)
-            if ai_score > 0.1:
-                reasons.extend(ai_reasons)
-            else:
-                reasons.append("🤖 AI evaluation: neutral/low relevance")
-            log_agent_action("Evaluator", f"✅ [AI] AI evaluation complete: score={ai_score:.2f}")
-        except Exception as e:
-            log_agent_action("Evaluator", f"⚠️ [AI] AI evaluation failed: {str(e)[:100]}")
-            reasons.append("🤖 AI evaluation: failed")
+        if self.gemini:
+            log_agent_action("Evaluator", f"🤖 [AI] Starting AI semantic evaluation {project_index}/{total_projects}...")
+            try:
+                ai_score, ai_reasons = self.gemini.evaluate_project_semantic(project, project_index, total_projects)
+                if ai_score > 0.1:
+                    reasons.extend(ai_reasons)
+                else:
+                    reasons.append("🤖 AI evaluation: neutral/low relevance")
+                log_agent_action("Evaluator", f"✅ [AI] AI evaluation complete: score={ai_score:.2f}")
+            except Exception as e:
+                log_agent_action("Evaluator", f"⚠️ [AI] AI evaluation failed: {str(e)[:100]}")
+                reasons.append("🤖 AI evaluation: failed")
+        else:
+            log_agent_action("Evaluator", "⚠️ [AI] Gemini not available, skipping AI evaluation")
+            ai_score = 0.0
+            reasons.append("🤖 AI evaluation: not available")
 
         # COMBINE SCORES: Rule-based (60%) + AI (40%)
         # This gives more weight to rule-based for speed, but AI for accuracy

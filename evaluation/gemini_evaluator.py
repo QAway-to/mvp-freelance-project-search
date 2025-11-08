@@ -1,7 +1,15 @@
-import google.generativeai as genai
 from typing import Dict, Any, Tuple, List
 import re
 import time
+
+# Safely import google.generativeai - may not be available on all systems
+try:
+    import google.generativeai as genai
+    GENAI_AVAILABLE = True
+except ImportError:
+    GENAI_AVAILABLE = False
+    genai = None
+
 from config import config
 from utils.logger import log_agent_action
 
@@ -10,15 +18,29 @@ class GeminiEvaluator:
 
     def __init__(self):
         self.model = None
-        if config.GEMINI_API_KEY:
-            try:
-                genai.configure(api_key=config.GEMINI_API_KEY)
-                self.model = genai.GenerativeModel('gemini-pro')
-                log_agent_action("Gemini", "✅ Gemini AI initialized successfully")
-            except Exception as e:
-                log_agent_action("Gemini", f"❌ Failed to initialize Gemini: {str(e)}")
-        else:
-            log_agent_action("Gemini", "⚠️ Gemini API key not provided, semantic evaluation disabled")
+        self.initialized = False
+        
+        # Safely initialize Gemini - don't fail if it's not available
+        try:
+            if not GENAI_AVAILABLE or genai is None:
+                log_agent_action("Gemini", "⚠️ google-generativeai module not installed - AI evaluation disabled")
+                self.initialized = False
+            elif config.GEMINI_API_KEY:
+                try:
+                    genai.configure(api_key=config.GEMINI_API_KEY)
+                    self.model = genai.GenerativeModel('gemini-pro')
+                    self.initialized = True
+                    log_agent_action("Gemini", "✅ Gemini AI initialized successfully")
+                except Exception as e:
+                    log_agent_action("Gemini", f"❌ Failed to initialize Gemini: {str(e)}")
+                    self.initialized = False
+            else:
+                log_agent_action("Gemini", "⚠️ Gemini API key not provided, semantic evaluation disabled")
+                self.initialized = False
+        except Exception as e:
+            # Don't crash if Gemini module is not available
+            log_agent_action("Gemini", f"⚠️ Gemini module error: {str(e)} - continuing without AI evaluation")
+            self.initialized = False
 
     def _clean_text_for_ai(self, text: str) -> str:
         """Clean text for AI processing"""
@@ -35,7 +57,7 @@ class GeminiEvaluator:
         Evaluate if project is about bot development using Gemini AI
         Returns: (score 0-1, reasoning)
         """
-        if not self.model:
+        if not self.initialized or not self.model:
             log_agent_action("Gemini", "⚠️ [AI] Gemini not available, using default score 0.5")
             return 0.5, "Gemini not available"
 
@@ -117,7 +139,7 @@ class GeminiEvaluator:
         Evaluate if project is about data parsing/processing using Gemini AI
         Returns: (score 0-1, reasoning)
         """
-        if not self.model:
+        if not self.initialized or not self.model:
             log_agent_action("Gemini", "⚠️ [AI] Gemini not available, using default score 0.5")
             return 0.5, "Gemini not available"
 
