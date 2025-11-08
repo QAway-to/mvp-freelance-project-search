@@ -153,10 +153,12 @@ class ProjectEvaluator:
 
         # SEMANTIC EVALUATION (first check - most accurate)
         semantic_relevant = True
-        semantic_similarity = 0.0
+        semantic_similarity = 0.0  # Initialize to 0.0, will be set if semantic evaluation runs
         semantic_verdict = ""
+        semantic_used = False
         
         if self.semantic_evaluator and self.semantic_evaluator.initialized:
+            semantic_used = True
             try:
                 log_agent_action("Evaluator", f"🤖 [SEMANTIC] Starting semantic evaluation for: {title[:50]}...")
                 semantic_similarity, best_match, semantic_relevant, semantic_verdict = self.semantic_evaluator.evaluate_semantic_relevance(
@@ -234,7 +236,7 @@ class ProjectEvaluator:
         score = max(0.0, min(1.0, score))
 
         # Add final score to reasons
-        if self.semantic_evaluator and self.semantic_evaluator.initialized:
+        if semantic_used and semantic_similarity > 0:
             rule_based_score = score - (semantic_similarity * 0.6)
             reasons.insert(0, f"🎯 Final score: {score:.2f} (Semantic: {semantic_similarity:.2f}×0.6 + Rule-based: {rule_based_score:.2f})")
         else:
