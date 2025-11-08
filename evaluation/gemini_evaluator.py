@@ -28,9 +28,10 @@ class GeminiEvaluator:
             elif config.GEMINI_API_KEY:
                 try:
                     genai.configure(api_key=config.GEMINI_API_KEY)
-                    self.model = genai.GenerativeModel('gemini-pro')
+                    # Use gemini-2.5-flash - stable and faster model
+                    self.model = genai.GenerativeModel('gemini-2.5-flash')
                     self.initialized = True
-                    log_agent_action("Gemini", "✅ Gemini AI initialized successfully")
+                    log_agent_action("Gemini", "✅ Gemini AI initialized successfully (model: gemini-2.5-flash)")
                 except Exception as e:
                     log_agent_action("Gemini", f"❌ Failed to initialize Gemini: {str(e)}")
                     self.initialized = False
