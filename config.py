@@ -10,7 +10,14 @@ except:
 
 class Config:
     # App settings
-    MODE: str = os.getenv('MODE', 'demo')
+    _mode = os.getenv('MODE', 'demo').lower().strip()  # Normalize to lowercase (full, FULL, Full -> full)
+    # Validate MODE value
+    if _mode not in ['demo', 'full']:
+        # If invalid, default to demo and log warning
+        import warnings
+        warnings.warn(f"Invalid MODE value: {os.getenv('MODE')}. Using 'demo' instead. Valid values: 'demo', 'full'")
+        _mode = 'demo'
+    MODE: str = _mode
     LOG_LEVEL: str = os.getenv('LOG_LEVEL', 'INFO')
 
     # Kwork settings

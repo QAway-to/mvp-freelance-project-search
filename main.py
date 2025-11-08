@@ -21,6 +21,10 @@ templates = Jinja2Templates(directory="templates")
 # Global agent instance
 agent_a = AgentA()
 
+# Log current configuration on startup
+log_agent_action("App", f"🚀 Application started in {config.MODE.upper()} mode")
+log_agent_action("App", f"📋 Search keyword: {config.SEARCH_KEYWORD}")
+
 @app.get("/")
 async def dashboard(request: Request):
     """Main dashboard"""
