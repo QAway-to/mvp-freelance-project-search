@@ -488,7 +488,7 @@ class AgentA:
                                     if title in description:
                                         desc_start = description.find(title) + len(title)
                                         description = description[desc_start:].strip()
-                                except:
+                                except Exception:
                                     pass
                             
                             log_agent_action("Agent A", f"✅ [SELENIUM] Full description extracted: {len(description)} chars")
@@ -518,7 +518,7 @@ class AgentA:
                                             break
                                     if budget:
                                         break
-                                except:
+                                except Exception:
                                     continue
                             
                             # If not found via selectors, try regex in page source
@@ -582,9 +582,9 @@ class AgentA:
                                             if match:
                                                 proposals = int(match.group(1))
                                                 break
-                                        except:
+                                        except Exception:
                                             continue
-                                except:
+                                except Exception:
                                     pass
                             
                             log_agent_action("Agent A", f"✅ [SELENIUM] Proposals: {proposals}")
@@ -625,9 +625,9 @@ class AgentA:
                                             if hired_element:
                                                 hired = 1
                                                 break
-                                        except:
+                                        except Exception:
                                             continue
-                                except:
+                                except Exception:
                                     pass
                             
                             log_agent_action("Agent A", f"✅ [SELENIUM] Hired: {hired}")
