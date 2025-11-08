@@ -32,7 +32,10 @@ class Config:
     # Telegram
     TELEGRAM_BOT_TOKEN: Optional[str] = os.getenv('TELEGRAM_BOT_TOKEN')
     TELEGRAM_CHANNEL_ID: Optional[str] = os.getenv('TELEGRAM_CHANNEL_ID')
-    
+
+    # Gemini AI
+    GEMINI_API_KEY: Optional[str] = os.getenv('GEMINI_API_KEY')
+
     # n8n Integration
     N8N_WEBHOOK_URL: Optional[str] = os.getenv('N8N_WEBHOOK_URL')
 

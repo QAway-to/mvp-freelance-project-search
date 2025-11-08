@@ -4,7 +4,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 import logging
 
 from config import config
@@ -34,55 +34,42 @@ async def dashboard(request: Request):
         "keyword": config.SEARCH_KEYWORD
     })
 
-@app.get("/logs/stream")
-async def stream_logs():
-    """Server-Sent Events for real-time logs - optimized for streaming"""
-    async def event_generator():
-        while True:
-            try:
-                # Rapidly read all available messages from queue
-                batch = []
-                max_batch = 200  # Read up to 200 messages at once
-                
-                # Collect all available messages immediately
-                while len(batch) < max_batch:
-                    try:
-                        log_message = log_queue.get_nowait()
-                        batch.append(log_message)
-                    except asyncio.QueueEmpty:
-                        break
-                
-                # Send all collected messages one by one (for streaming effect)
-                for log_message in batch:
-                    yield f"data: {log_message}\n\n"
-                    # Minimal delay - just enough to allow browser to process
-                    if len(batch) > 1:
-                        await asyncio.sleep(0.0001)  # Very small delay for streaming
-                
-                # If we sent messages, check again immediately
-                if batch:
-                    continue
-                
-                # No messages available - wait briefly for new messages
-                try:
-                    log_message = await asyncio.wait_for(log_queue.get(), timeout=0.01)
-                    yield f"data: {log_message}\n\n"
-                except asyncio.TimeoutError:
-                    # Send keepalive to maintain connection
-                    yield f": keepalive\n\n"
-                    await asyncio.sleep(0.05)  # Very short wait
-                    
-            except Exception as e:
-                yield f"data: {{\"error\": \"{str(e)}\"}}\n\n"
-                await asyncio.sleep(0.1)
+@app.get("/logs")
+async def get_logs():
+    """Get current logs as plain text - simple line-by-line approach"""
+    logs = []
+    max_logs = 500  # Return last 500 log entries
 
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
+    # Collect all available logs from queue
+    collected = 0
+    while collected < max_logs:
+        try:
+            log_entry_json = log_queue.get_nowait()
+            # Parse JSON and extract message
+            import json
+            log_entry = json.loads(log_entry_json)
+            message = log_entry.get('message', '')
+
+            # Format as simple text line
+            timestamp = log_entry.get('timestamp', '')[:19]  # YYYY-MM-DDTHH:MM:SS
+            level = log_entry.get('level', 'INFO')
+            logs.append(f"[{timestamp}] {level}: {message}")
+            collected += 1
+        except asyncio.QueueEmpty:
+            break
+        except Exception as e:
+            logs.append(f"[ERROR] Failed to parse log: {str(e)}")
+            break
+
+    # Return as plain text with line breaks
+    log_text = "\n".join(logs) if logs else "No logs available yet..."
+
+    return Response(
+        content=log_text,
+        media_type="text/plain; charset=utf-8",
         headers={
             "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Disable nginx buffering
+            "X-Content-Type-Options": "nosniff",
         }
     )
 

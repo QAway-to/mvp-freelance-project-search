@@ -177,6 +177,30 @@ class AgentA:
         time.sleep(delay)
         return delay
 
+    def _is_title_preliminary_relevant(self, title: str) -> bool:
+        """Preliminary title filtering before detailed evaluation"""
+        if not title:
+            return False
+
+        title_lower = title.lower()
+
+        # Must contain relevant indicators
+        relevant_indicators = [
+            'бот', 'telegram', 'discord', 'автомат', 'парсер', 'парсинг',
+            'данные', 'data', 'api', 'интеграц', 'автоматиз', 'скрипт'
+        ]
+
+        # Must NOT contain irrelevant words
+        irrelevant_words = [
+            'дизайн', 'логотип', 'баннер', 'фото', 'видео', 'текст',
+            'копирайт', 'верстка', 'html', 'css', 'фронтенд', 'анимация'
+        ]
+
+        has_relevant = any(word in title_lower for word in relevant_indicators)
+        has_irrelevant = any(word in title_lower for word in irrelevant_words)
+
+        return has_relevant and not has_irrelevant
+
     def simulate_reading(self, duration: int = None):
         """Simulate human reading"""
         if duration is None:
@@ -255,7 +279,12 @@ class AgentA:
                 try:
                     title = link_element.text.strip()
                     url = link_element.get_attribute("href")
-                    
+
+                    # PRELIMINARY TITLE FILTERING - skip obviously irrelevant projects
+                    if not self._is_title_preliminary_relevant(title):
+                        log_agent_action("Agent A", f"🚫 [FILTER] Skipped irrelevant project {i+1}: {title[:50]}...")
+                        continue
+
                     # Ensure URL has /view suffix for correct endpoint
                     if url and '/projects/' in url:
                         # Remove query parameters if any
@@ -267,7 +296,7 @@ class AgentA:
                                 url = url.rstrip('/') + '/view'
                             else:
                                 url = url + '/view'
-                    
+
                     # Extract project ID from URL
                     project_id = ""
                     if '/' in url:
@@ -279,19 +308,19 @@ class AgentA:
                             project_id = last_part.split('?')[0]
                     else:
                         project_id = str(i)
-                    
+
                     project_info_list.append({
                         "id": project_id,
                         "title": title,
                         "url": url,
                         "index": i + 1
                     })
-                    log_agent_action("Agent A", f"📋 [SELENIUM] Collected project {i+1}: {title[:50]}... -> {url}")
+                    log_agent_action("Agent A", f"📋 [SELENIUM] Collected relevant project {i+1}: {title[:50]}... -> {url}")
                 except Exception as e:
                     log_agent_action("Agent A", f"⚠️ [SELENIUM] Error collecting project {i+1} info: {str(e)}")
                     continue
 
-            log_agent_action("Agent A", f"✅ [SELENIUM] Collected {len(project_info_list)} projects to process")
+            log_agent_action("Agent A", f"✅ [SELENIUM] Collected {len(project_info_list)} relevant projects to process (filtered from {min(len(project_elements), config.MAX_PROJECTS_PER_SESSION)})")
 
             # Now process each project by navigating directly to its URL
             log_agent_action("Agent A", f"📊 [SELENIUM] Processing {len(project_info_list)} projects...")
