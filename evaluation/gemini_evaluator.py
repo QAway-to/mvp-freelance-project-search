@@ -1,6 +1,7 @@
 from typing import Dict, Any, Tuple, List
 import re
 import time
+import numpy as np
 
 # Safely import google.generativeai - may not be available on all systems
 try:
@@ -14,11 +15,13 @@ from config import config
 from utils.logger import log_agent_action
 
 class GeminiEvaluator:
-    """Use Gemini AI for semantic evaluation of projects"""
+    """Use Gemini embedding model for semantic similarity evaluation"""
 
     def __init__(self):
-        self.model = None
         self.initialized = False
+        self.bot_reference_embedding = None
+        self.data_reference_embedding = None
+        self.embedding_model = "models/text-embedding-004"
         
         # Safely initialize Gemini - don't fail if it's not available
         try:
@@ -28,10 +31,12 @@ class GeminiEvaluator:
             elif config.GEMINI_API_KEY:
                 try:
                     genai.configure(api_key=config.GEMINI_API_KEY)
-                    # Use gemini-2.5-flash - stable and faster model
-                    self.model = genai.GenerativeModel('gemini-2.5-flash')
                     self.initialized = True
-                    log_agent_action("Gemini", "✅ Gemini AI initialized successfully (model: gemini-2.5-flash)")
+                    log_agent_action("Gemini", "✅ Gemini embedding model initialized successfully (model: text-embedding-004)")
+                    
+                    # Pre-compute reference embeddings for bot and data projects
+                    self._initialize_reference_embeddings()
+                    
                 except Exception as e:
                     log_agent_action("Gemini", f"❌ Failed to initialize Gemini: {str(e)}")
                     self.initialized = False
@@ -43,6 +48,73 @@ class GeminiEvaluator:
             log_agent_action("Gemini", f"⚠️ Gemini module error: {str(e)} - continuing without AI evaluation")
             self.initialized = False
 
+    def _initialize_reference_embeddings(self):
+        """Pre-compute reference embeddings for bot and data projects"""
+        try:
+            log_agent_action("Gemini", "🔧 [AI] Computing reference embeddings for bot and data projects...")
+            
+            # Reference text for bot projects
+            bot_reference_text = """
+            Создание Telegram бота, Discord бота, VK бота. Автоматизация чатов, 
+            обработка сообщений, интеграция с API мессенджеров. Разработка ботов 
+            для уведомлений, модерации, обработки команд. Использование библиотек 
+            aiogram, discord.py, python-telegram-bot.
+            """
+            
+            # Reference text for data processing projects
+            data_reference_text = """
+            Парсинг сайтов, web scraping, сбор данных, обработка данных, анализ данных.
+            API интеграции, ETL процессы, работа с базами данных. Обработка CSV, JSON, 
+            XML файлов. Использование библиотек requests, beautifulsoup, scrapy, selenium, pandas.
+            """
+            
+            # Compute embeddings
+            start_time = time.time()
+            self.bot_reference_embedding = self._get_embedding(bot_reference_text)
+            elapsed_bot = time.time() - start_time
+            
+            start_time = time.time()
+            self.data_reference_embedding = self._get_embedding(data_reference_text)
+            elapsed_data = time.time() - start_time
+            
+            log_agent_action("Gemini", f"✅ [AI] Reference embeddings computed (bot: {elapsed_bot:.2f}s, data: {elapsed_data:.2f}s)")
+            
+        except Exception as e:
+            log_agent_action("Gemini", f"❌ [AI] Failed to compute reference embeddings: {str(e)}")
+            self.initialized = False
+
+    def _get_embedding(self, text: str) -> List[float]:
+        """Get embedding vector for text using Gemini embedding model"""
+        try:
+            result = genai.embed_content(
+                model=self.embedding_model,
+                content=text,
+                task_type="SEMANTIC_SIMILARITY"
+            )
+            return result['embedding']
+        except Exception as e:
+            log_agent_action("Gemini", f"❌ [AI] Error getting embedding: {str(e)}")
+            raise
+
+    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+        """Calculate cosine similarity between two vectors"""
+        try:
+            v1 = np.array(vec1)
+            v2 = np.array(vec2)
+            dot_product = np.dot(v1, v2)
+            norm1 = np.linalg.norm(v1)
+            norm2 = np.linalg.norm(v2)
+            
+            if norm1 == 0 or norm2 == 0:
+                return 0.0
+            
+            similarity = dot_product / (norm1 * norm2)
+            # Normalize to 0-1 range (cosine similarity is -1 to 1, but embeddings are usually positive)
+            return max(0.0, min(1.0, (similarity + 1) / 2))
+        except Exception as e:
+            log_agent_action("Gemini", f"⚠️ [AI] Error calculating cosine similarity: {str(e)}")
+            return 0.0
+
     def _clean_text_for_ai(self, text: str) -> str:
         """Clean text for AI processing"""
         if not text:
@@ -50,15 +122,15 @@ class GeminiEvaluator:
 
         # Remove extra whitespace
         text = re.sub(r'\s+', ' ', text)
-        # Limit length to avoid token limits
-        return text[:2000]  # Gemini has token limits
+        # Limit length to avoid token limits (embedding models have limits)
+        return text[:2000]  # Gemini embedding has token limits
 
     def evaluate_bot_project(self, title: str, description: str, project_index: int = 0, total_projects: int = 0) -> Tuple[float, str]:
         """
-        Evaluate if project is about bot development using Gemini AI
+        Evaluate if project is about bot development using embedding similarity
         Returns: (score 0-1, reasoning)
         """
-        if not self.initialized or not self.model:
+        if not self.initialized or self.bot_reference_embedding is None:
             log_agent_action("Gemini", "⚠️ [AI] Gemini not available, using default score 0.5")
             return 0.5, "Gemini not available"
 
@@ -70,65 +142,25 @@ class GeminiEvaluator:
             full_text = f"Название: {title}\nОписание: {description}"
             clean_text = self._clean_text_for_ai(full_text)
             
-            log_agent_action("Gemini", f"📤 [AI] Sending request to Gemini API (text length: {len(clean_text)} chars)...")
+            log_agent_action("Gemini", f"📤 [AI] Computing embedding for project text (length: {len(clean_text)} chars)...")
 
-            prompt = f"""
-            Проанализируй этот проект и определи, насколько он подходит для разработчика Telegram/Discord/VK ботов.
-
-            Проект:
-            {clean_text}
-
-            Оцени по шкале 0.0 до 1.0, где:
-            - 1.0: Идеально подходит (создание бота, автоматизация чатов, интеграция API)
-            - 0.8: Хорошо подходит (боты + смежные технологии)
-            - 0.5: Возможно подходит (требует уточнения)
-            - 0.2: Слабо подходит (косвенно связано)
-            - 0.0: Не подходит (дизайн, тексты, другие сферы)
-
-            Верни только число от 0.0 до 1.0 и краткое объяснение через запятую.
-            Формат: "0.8, создание Telegram бота для автоматизации"
-            """
-
-            # Send request with timeout tracking
+            # Compute embedding for project
             start_time = time.time()
-            log_agent_action("Gemini", f"⏳ [AI] Waiting for Gemini response...")
-            
-            try:
-                response = self.model.generate_content(
-                    prompt,
-                    generation_config={
-                        "temperature": 0.3,  # Lower temperature for more consistent results
-                        "max_output_tokens": 100,  # Limit response length
-                    }
-                )
-                
-                elapsed_time = time.time() - start_time
-                log_agent_action("Gemini", f"✅ [AI] Received response from Gemini ({elapsed_time:.2f}s)")
-                
-                result_text = response.text.strip()
-                log_agent_action("Gemini", f"📥 [AI] Raw response: {result_text[:150]}...")
+            project_embedding = self._get_embedding(clean_text)
+            elapsed_time = time.time() - start_time
+            log_agent_action("Gemini", f"✅ [AI] Embedding computed ({elapsed_time:.2f}s)")
 
-                # Parse response: "0.8, explanation"
-                if ',' in result_text:
-                    score_part, reason = result_text.split(',', 1)
-                    try:
-                        score = float(score_part.strip())
-                        score = max(0.0, min(1.0, score))  # Clamp to 0-1
-                        log_agent_action("Gemini", f"✅ [AI] Bot evaluation complete: score={score:.2f}, reason={reason.strip()[:50]}")
-                        return score, reason.strip()
-                    except ValueError as ve:
-                        log_agent_action("Gemini", f"⚠️ [AI] Failed to parse score: {score_part} (error: {str(ve)})")
-                else:
-                    log_agent_action("Gemini", f"⚠️ [AI] Response format unexpected (no comma): {result_text[:100]}")
+            # Calculate similarity with bot reference
+            similarity = self._cosine_similarity(project_embedding, self.bot_reference_embedding)
+            log_agent_action("Gemini", f"📊 [AI] Bot similarity score: {similarity:.3f}")
 
-                # Fallback if parsing fails
-                log_agent_action("Gemini", f"⚠️ [AI] Using fallback score 0.5 due to parsing error")
-                return 0.5, f"Не удалось распарсить ответ AI: {result_text[:100]}"
+            # Convert similarity to score (0-1 range)
+            # Similarity is already normalized, but we can adjust threshold
+            score = similarity
+            reason = f"Семантическое сходство с бот-проектами: {similarity:.2f}"
 
-            except Exception as api_error:
-                elapsed_time = time.time() - start_time
-                log_agent_action("Gemini", f"❌ [AI] API error after {elapsed_time:.2f}s: {str(api_error)[:100]}")
-                raise
+            log_agent_action("Gemini", f"✅ [AI] Bot evaluation complete: score={score:.2f}")
+            return score, reason
 
         except Exception as e:
             error_msg = str(e)[:100]
@@ -137,10 +169,10 @@ class GeminiEvaluator:
 
     def evaluate_data_project(self, title: str, description: str, project_index: int = 0, total_projects: int = 0) -> Tuple[float, str]:
         """
-        Evaluate if project is about data parsing/processing using Gemini AI
+        Evaluate if project is about data parsing/processing using embedding similarity
         Returns: (score 0-1, reasoning)
         """
-        if not self.initialized or not self.model:
+        if not self.initialized or self.data_reference_embedding is None:
             log_agent_action("Gemini", "⚠️ [AI] Gemini not available, using default score 0.5")
             return 0.5, "Gemini not available"
 
@@ -152,65 +184,24 @@ class GeminiEvaluator:
             full_text = f"Название: {title}\nОписание: {description}"
             clean_text = self._clean_text_for_ai(full_text)
             
-            log_agent_action("Gemini", f"📤 [AI] Sending data evaluation request to Gemini API (text length: {len(clean_text)} chars)...")
+            log_agent_action("Gemini", f"📤 [AI] Computing embedding for project text (length: {len(clean_text)} chars)...")
 
-            prompt = f"""
-            Проанализируй этот проект и определи, насколько он подходит для специалиста по парсингу и обработке данных.
-
-            Проект:
-            {clean_text}
-
-            Оцени по шкале 0.0 до 1.0, где:
-            - 1.0: Идеально подходит (парсинг сайтов, обработка данных, API интеграции, ETL)
-            - 0.8: Хорошо подходит (данные + автоматизация)
-            - 0.5: Возможно подходит (работа с данными)
-            - 0.2: Слабо подходит (косвенно связано с данными)
-            - 0.0: Не подходит (дизайн, боты, другие сферы)
-
-            Верни только число от 0.0 до 1.0 и краткое объяснение через запятую.
-            Формат: "0.9, парсинг и обработка данных из API"
-            """
-
-            # Send request with timeout tracking
+            # Compute embedding for project
             start_time = time.time()
-            log_agent_action("Gemini", f"⏳ [AI] Waiting for Gemini response (data evaluation)...")
-            
-            try:
-                response = self.model.generate_content(
-                    prompt,
-                    generation_config={
-                        "temperature": 0.3,
-                        "max_output_tokens": 100,
-                    }
-                )
-                
-                elapsed_time = time.time() - start_time
-                log_agent_action("Gemini", f"✅ [AI] Received response from Gemini ({elapsed_time:.2f}s)")
-                
-                result_text = response.text.strip()
-                log_agent_action("Gemini", f"📥 [AI] Raw response: {result_text[:150]}...")
+            project_embedding = self._get_embedding(clean_text)
+            elapsed_time = time.time() - start_time
+            log_agent_action("Gemini", f"✅ [AI] Embedding computed ({elapsed_time:.2f}s)")
 
-                # Parse response: "0.9, explanation"
-                if ',' in result_text:
-                    score_part, reason = result_text.split(',', 1)
-                    try:
-                        score = float(score_part.strip())
-                        score = max(0.0, min(1.0, score))  # Clamp to 0-1
-                        log_agent_action("Gemini", f"✅ [AI] Data evaluation complete: score={score:.2f}, reason={reason.strip()[:50]}")
-                        return score, reason.strip()
-                    except ValueError as ve:
-                        log_agent_action("Gemini", f"⚠️ [AI] Failed to parse score: {score_part} (error: {str(ve)})")
-                else:
-                    log_agent_action("Gemini", f"⚠️ [AI] Response format unexpected (no comma): {result_text[:100]}")
+            # Calculate similarity with data reference
+            similarity = self._cosine_similarity(project_embedding, self.data_reference_embedding)
+            log_agent_action("Gemini", f"📊 [AI] Data similarity score: {similarity:.3f}")
 
-                # Fallback if parsing fails
-                log_agent_action("Gemini", f"⚠️ [AI] Using fallback score 0.5 due to parsing error")
-                return 0.5, f"Не удалось распарсить ответ AI: {result_text[:100]}"
+            # Convert similarity to score (0-1 range)
+            score = similarity
+            reason = f"Семантическое сходство с проектами обработки данных: {similarity:.2f}"
 
-            except Exception as api_error:
-                elapsed_time = time.time() - start_time
-                log_agent_action("Gemini", f"❌ [AI] API error after {elapsed_time:.2f}s: {str(api_error)[:100]}")
-                raise
+            log_agent_action("Gemini", f"✅ [AI] Data evaluation complete: score={score:.2f}")
+            return score, reason
 
         except Exception as e:
             error_msg = str(e)[:100]
@@ -233,19 +224,19 @@ class GeminiEvaluator:
         # Evaluate as bot project
         log_agent_action("Gemini", f"🤖 [AI] Step 1/2: Evaluating as bot project...")
         bot_score, bot_reason = self.evaluate_bot_project(title, description, project_index, total_projects)
-        if bot_score > 0.6:  # Lower threshold to show more results
+        if bot_score > 0.5:  # Threshold for relevance
             total_score = max(total_score, bot_score * 0.8)  # Weight bot projects higher
             reasons.append(f"🤖 Бот-проект: {bot_reason} (score: {bot_score:.2f})")
 
         # Evaluate as data project
         log_agent_action("Gemini", f"📊 [AI] Step 2/2: Evaluating as data project...")
         data_score, data_reason = self.evaluate_data_project(title, description, project_index, total_projects)
-        if data_score > 0.6:  # Lower threshold
+        if data_score > 0.5:  # Threshold
             total_score = max(total_score, data_score * 0.7)  # Data projects weight
             reasons.append(f"📊 Проект данных: {data_reason} (score: {data_score:.2f})")
 
         # If both are relevant, boost score
-        if bot_score > 0.5 and data_score > 0.5:
+        if bot_score > 0.4 and data_score > 0.4:
             total_score = min(1.0, total_score + 0.1)
             reasons.append("🎯 Комбинированный проект (боты + данные)")
 
