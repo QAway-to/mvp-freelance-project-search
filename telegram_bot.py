@@ -33,12 +33,13 @@ class TelegramNotifier:
 
             message += f"📋 <b>Название:</b> {project.get('title', 'N/A')}\n"
             message += f"💰 <b>Бюджет:</b> {project.get('budget', 'N/A')}\n"
-            message += f"📊 <b>Релевантность:</b> {score:.2f}/1.0\n\n"
+            message += f"📊 <b>Релевантность:</b> {score:.2f}/1.0\n"
+            message += f"📊 <b>Предложений:</b> {project.get('proposals', 0)}\n"
+            message += f"👥 <b>Нанято:</b> {project.get('hired', 0)}\n\n"
 
-            message += f"📝 <b>Описание:</b>\n{project.get('description', 'N/A')[:300]}"
-
-            if len(project.get('description', '')) > 300:
-                message += "..."
+            # Send FULL description without truncation
+            description = project.get('description', 'N/A')
+            message += f"📝 <b>Описание:</b>\n{description}"
 
             message += "\n\n🔗 <b>Ссылка:</b> " + project.get('url', 'N/A')
 

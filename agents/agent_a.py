@@ -159,73 +159,12 @@ class AgentA:
         self.simulate_reading()
         log_agent_action("Agent A", "✅ [DEMO] Reading simulation complete")
 
-        # Fake projects data - include "бот" keyword for better demo
-        log_agent_action("Agent A", "🎭 [DEMO] Loading demo projects database...")
-        fake_projects = [
-            {
-                "id": "1234567",
-                "title": "Создать Telegram бота для уведомлений о скидках",
-                "description": "Нужен бот который будет мониторить скидки на сайте и отправлять уведомления пользователям. Требуется опыт работы с Telegram API, Python или Node.js. Бот должен уметь работать с базой данных пользователей. Необходимо реализовать систему подписок, настройку фильтров по категориям товаров, отправку уведомлений в реальном времени. Также требуется интеграция с популярными маркетплейсами для мониторинга цен.",
-                "budget": "15 000 ₽",
-                "url": "https://kwork.ru/projects/1234567/view",
-                "proposals": 8,
-                "hired": 0,
-                "found_at": datetime.now().isoformat()
-            },
-            {
-                "id": "2345678",
-                "title": "Разработка Discord бота модератора",
-                "description": "Требуется создать бота для Discord сервера. Функционал: автоматическая модерация чата, система предупреждений, логирование действий. Предпочтительно на Python с использованием discord.py. Бот должен уметь автоматически удалять спам, блокировать пользователей за нарушения, вести статистику активности участников. Также нужна система ролей и автоматическая выдача прав на основе активности.",
-                "budget": "8 000 ₽",
-                "url": "https://kwork.ru/projects/2345678/view",
-                "proposals": 12,
-                "hired": 1,
-                "found_at": datetime.now().isoformat()
-            },
-            {
-                "id": "3456789",
-                "title": "Бот для парсинга данных с сайтов",
-                "description": "Нужно разработать бота для автоматического сбора информации с нескольких сайтов. Обработка HTML, сохранение в базу данных. Защита от блокировок, ротация прокси. Бот должен работать автономно. Требуется реализовать механизм обхода антибот защиты, обработку различных форматов данных (JSON, XML, HTML), экспорт в различные форматы. Необходима система уведомлений об ошибках и статусе работы бота.",
-                "budget": "25 000 ₽",
-                "url": "https://kwork.ru/projects/3456789/view",
-                "proposals": 5,
-                "hired": 0,
-                "found_at": datetime.now().isoformat()
-            },
-            {
-                "id": "4567890",
-                "title": "Умный бот для обработки заказов",
-                "description": "Создать бота который будет автоматически обрабатывать заказы с сайта. Интеграция с платежными системами, отправка уведомлений клиентам. Бот должен быть умным и адаптивным. Необходимо реализовать обработку различных типов заказов, автоматическое формирование счетов, интеграцию с CRM системами. Бот должен уметь обрабатывать возвраты, отмены заказов, автоматически отправлять трекинг номера клиентам.",
-                "budget": "20 000 ₽",
-                "url": "https://kwork.ru/projects/4567890/view",
-                "proposals": 15,
-                "hired": 2,
-                "found_at": datetime.now().isoformat()
-            },
-            {
-                "id": "5678901",
-                "title": "Создать чатбот для сайта на JavaScript",
-                "description": "Интегрировать чатбот на сайт компании. Бот должен отвечать на типичные вопросы, собирать контакты, передавать информацию менеджеру. Использовать Dialogflow или аналог. Требуется красивое оформление чатбота в стиле сайта, возможность настройки диалогов через админ панель, интеграция с мессенджерами (Telegram, WhatsApp). Также нужна аналитика разговоров и статистика по наиболее частым вопросам.",
-                "budget": "12 000 ₽",
-                "url": "https://kwork.ru/projects/5678901/view",
-                "proposals": 20,
-                "hired": 0,
-                "found_at": datetime.now().isoformat()
-            }
-        ]
-
-        # Simulate finding projects with delays
-        log_agent_action("Agent A", f"🔍 [DEMO] Processing {min(len(fake_projects), config.MAX_PROJECTS_PER_SESSION)} projects...")
-        found_projects = []
-        for i, project in enumerate(fake_projects[:config.MAX_PROJECTS_PER_SESSION]):
-            log_agent_action("Agent A", f"📄 [DEMO] Project {i+1}/{min(len(fake_projects), config.MAX_PROJECTS_PER_SESSION)}: {project['title'][:50]}...")
-            log_agent_action("Agent A", f"💰 [DEMO] Budget: {project.get('budget', 'N/A')}")
-            found_projects.append(project)
-            delay = self.human_delay(1, 3)  # Simulate processing time
-            log_agent_action("Agent A", f"⏱️ [DEMO] Processing delay: {delay:.2f}s")
-
-        log_agent_action("Agent A", f"✅ [DEMO] Demo search complete: {len(found_projects)} projects generated and processed")
-        return found_projects
+        # Demo mode: Return empty list - no fake projects
+        # Real projects should be obtained via MODE=full with browser automation
+        log_agent_action("Agent A", "🎭 [DEMO] Demo mode: Fake projects disabled")
+        log_agent_action("Agent A", "🎭 [DEMO] To get real projects, set MODE=full and provide Kwork credentials")
+        log_agent_action("Agent A", "🎭 [DEMO] Returning empty list - use MODE=full for real project parsing")
+        return []
 
     def _search_real_projects(self) -> List[Dict[str, Any]]:
         """Real search on Kwork"""
@@ -265,193 +204,29 @@ class AgentA:
                 try:
                     log_agent_action("Agent A", f"🔍 [SELENIUM] Parsing project {i+1}/{min(len(project_elements), config.MAX_PROJECTS_PER_SESSION)}...")
                     
-                    # Extract project data
+                    # Extract basic info from list page
                     title = link_element.text.strip()
                     url = link_element.get_attribute("href")
                     # Ensure URL has /view suffix for correct endpoint
-                    if url and '/projects/' in url and not url.endswith('/view'):
+                    if url and '/projects/' in url:
                         # Remove query parameters if any
                         if '?' in url:
                             url = url.split('?')[0]
-                        # Add /view if not present
+                        # Ensure /view suffix
                         if not url.endswith('/view'):
-                            url = url + '/view'
+                            if url.endswith('/'):
+                                url = url.rstrip('/') + '/view'
+                            else:
+                                url = url + '/view'
+                    
                     log_agent_action("Agent A", f"📄 [SELENIUM] Title: {title[:50]}...")
+                    log_agent_action("Agent A", f"🔗 [SELENIUM] URL: {url}")
 
-                    # Get description (usually in the same container)
-                    log_agent_action("Agent A", f"🔍 [SELENIUM] Extracting description...")
-                    project_container = link_element.find_element(By.XPATH, "../../../..")
-
-                    # Try different selectors for description - get FULL description
-                    description = ""
-                    try:
-                        # Try multiple selectors for description
-                        selectors = [
-                            ".project-description",
-                            ".task__description",
-                            "[class*='description']",
-                            "[class*='text']",
-                            ".wants-card__description-text",
-                            ".task-card__description"
-                        ]
-                        for selector in selectors:
-                            try:
-                                desc_element = project_container.find_element(By.CSS_SELECTOR, selector)
-                                description = desc_element.text.strip()
-                                if description and len(description) > 50:  # Valid description
-                                    break
-                            except:
-                                continue
-                        
-                        # If still no description, try getting all text and extract
-                        if not description or len(description) < 50:
-                            container_text = project_container.text
-                            # Remove title and get all text after it
-                            desc_start = container_text.find(title) + len(title)
-                            remaining_text = container_text[desc_start:].strip()
-                            # Get full description (remove budget and other metadata)
-                            lines = remaining_text.split('\n')
-                            description_lines = []
-                            for line in lines:
-                                line = line.strip()
-                                if line and not any(keyword in line.lower() for keyword in ['₽', 'руб', 'предложен', 'нанят', 'бюджет']):
-                                    description_lines.append(line)
-                                elif line and ('₽' in line or 'руб' in line):
-                                    break  # Stop at budget line
-                            description = '\n'.join(description_lines).strip()
-                        
-                        log_agent_action("Agent A", f"✅ [SELENIUM] Full description extracted: {len(description)} chars")
-                    except Exception as e:
-                        log_agent_action("Agent A", f"⚠️ [SELENIUM] Error extracting description: {str(e)}")
-
-                    # Get budget information
-                    log_agent_action("Agent A", f"💰 [SELENIUM] Extracting budget...")
-                    budget = ""
-                    try:
-                        budget_selectors = [
-                            "[class*='price']",
-                            "[class*='budget']",
-                            "[class*='amount']",
-                            ".wants-card__price-text",
-                            ".task-card__price"
-                        ]
-                        for selector in budget_selectors:
-                            try:
-                                budget_element = project_container.find_element(By.CSS_SELECTOR, selector)
-                                budget = budget_element.text.strip()
-                                if budget and ('₽' in budget or 'руб' in budget):
-                                    break
-                            except:
-                                continue
-                        log_agent_action("Agent A", f"✅ [SELENIUM] Budget: {budget}")
-                    except:
-                        log_agent_action("Agent A", f"⚠️ [SELENIUM] Budget not found")
-
-                    # Get proposals count (предложения)
-                    log_agent_action("Agent A", f"📊 [SELENIUM] Extracting proposals count...")
-                    proposals = None
-                    try:
-                        # Try to find proposals count - usually in format "N предложений" or "N предложен"
-                        container_text = project_container.text
-                        # Look for patterns like "5 предложений", "12 предложен", "3 отклика"
-                        proposals_patterns = [
-                            r'(\d+)\s+предложен',
-                            r'(\d+)\s+предложений',
-                            r'(\d+)\s+отклик',
-                            r'(\d+)\s+откликов'
-                        ]
-                        for pattern in proposals_patterns:
-                            match = re.search(pattern, container_text, re.IGNORECASE)
-                            if match:
-                                proposals = int(match.group(1))
-                                break
-                        
-                        # Also try CSS selectors
-                        if proposals is None:
-                            proposals_selectors = [
-                                "[class*='proposal']",
-                                "[class*='response']",
-                                "[class*='offer']",
-                                ".wants-card__responses",
-                                ".task-card__responses"
-                            ]
-                            for selector in proposals_selectors:
-                                try:
-                                    prop_element = project_container.find_element(By.CSS_SELECTOR, selector)
-                                    prop_text = prop_element.text.strip()
-                                    match = re.search(r'(\d+)', prop_text)
-                                    if match:
-                                        proposals = int(match.group(1))
-                                        break
-                                except:
-                                    continue
-                        
-                        if proposals is not None:
-                            log_agent_action("Agent A", f"✅ [SELENIUM] Proposals: {proposals}")
-                        else:
-                            log_agent_action("Agent A", f"⚠️ [SELENIUM] Proposals count not found")
-                    except Exception as e:
-                        log_agent_action("Agent A", f"⚠️ [SELENIUM] Error extracting proposals: {str(e)}")
-
-                    # Get hired count (нанято)
-                    log_agent_action("Agent A", f"👥 [SELENIUM] Extracting hired count...")
-                    hired = None
-                    try:
-                        container_text = project_container.text
-                        # Look for patterns like "2 нанято", "нанят: 1", "исполнитель нанят"
-                        hired_patterns = [
-                            r'(\d+)\s+нанят',
-                            r'нанят[:\s]+(\d+)',
-                            r'исполнитель.*нанят',
-                            r'(\d+)\s+исполнител'
-                        ]
-                        for pattern in hired_patterns:
-                            match = re.search(pattern, container_text, re.IGNORECASE)
-                            if match:
-                                if match.lastindex:
-                                    hired = int(match.group(1))
-                                else:
-                                    hired = 1  # Just "нанят" means at least 1
-                                break
-                        
-                        # Also check for visual indicators
-                        if hired is None:
-                            try:
-                                # Check if there's a "hired" badge or indicator
-                                hired_indicators = [
-                                    "[class*='hired']",
-                                    "[class*='executor']",
-                                    ".wants-card__executor",
-                                    ".task-card__executor"
-                                ]
-                                for selector in hired_indicators:
-                                    try:
-                                        hired_element = project_container.find_element(By.CSS_SELECTOR, selector)
-                                        if hired_element:
-                                            hired = 1  # At least one hired
-                                            break
-                                    except:
-                                        continue
-                            except:
-                                pass
-                        
-                        if hired is not None:
-                            log_agent_action("Agent A", f"✅ [SELENIUM] Hired: {hired}")
-                        else:
-                            log_agent_action("Agent A", f"⚠️ [SELENIUM] Hired count not found, defaulting to 0")
-                            hired = 0
-                    except Exception as e:
-                        log_agent_action("Agent A", f"⚠️ [SELENIUM] Error extracting hired: {str(e)}")
-                        hired = 0
-
-                    # Extract project ID from URL (real ID, not demo_)
-                    # URL format: https://kwork.ru/projects/1234567/view
+                    # Extract project ID from URL
+                    project_id = ""
                     if '/' in url:
-                        # Split by / and get the ID (second to last part if /view exists)
                         url_parts = url.split('/')
-                        # Remove query parameters from last part
                         last_part = url_parts[-1].split('?')[0]
-                        # If last part is 'view', get the previous part as ID
                         if last_part == 'view' and len(url_parts) >= 2:
                             project_id = url_parts[-2].split('?')[0]
                         else:
@@ -459,19 +234,201 @@ class AgentA:
                     else:
                         project_id = str(i)
 
+                    # Navigate to project page to get FULL description and details
+                    log_agent_action("Agent A", f"🌐 [SELENIUM] Navigating to project page for full details...")
+                    try:
+                        self.driver.get(url)
+                        log_agent_action("Agent A", f"✅ [SELENIUM] Project page loaded")
+                        
+                        # Wait for page to load
+                        delay = self.human_delay(2, 4)
+                        log_agent_action("Agent A", f"⏱️ [SELENIUM] Waiting for page stabilization: {delay:.2f}s")
+                        
+                        # Get FULL description from project page
+                        description = ""
+                        log_agent_action("Agent A", f"📝 [SELENIUM] Extracting FULL description from project page...")
+                        try:
+                            # Try multiple selectors for full description on project page
+                            desc_selectors = [
+                                ".wants-card__description-text",
+                                ".task__description",
+                                "[class*='description-text']",
+                                "[class*='wants-card__text']",
+                                ".project-description",
+                                "[data-test-id='task-description']",
+                                ".break-word"
+                            ]
+                            
+                            for selector in desc_selectors:
+                                try:
+                                    desc_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                                    if desc_elements:
+                                        # Get text from all matching elements (in case description is split)
+                                        desc_texts = [elem.text.strip() for elem in desc_elements if elem.text.strip()]
+                                        if desc_texts:
+                                            description = '\n'.join(desc_texts)
+                                            if len(description) > 100:  # Valid full description
+                                                break
+                                except:
+                                    continue
+                            
+                            # Fallback: get all text from main content area
+                            if not description or len(description) < 100:
+                                try:
+                                    main_content = self.driver.find_element(By.CSS_SELECTOR, "main, .content, .container, [class*='wants-card']")
+                                    description = main_content.text.strip()
+                                    # Remove title and metadata
+                                    if title in description:
+                                        desc_start = description.find(title) + len(title)
+                                        description = description[desc_start:].strip()
+                                except:
+                                    pass
+                            
+                            log_agent_action("Agent A", f"✅ [SELENIUM] Full description extracted: {len(description)} chars")
+                        except Exception as e:
+                            log_agent_action("Agent A", f"⚠️ [SELENIUM] Error extracting full description: {str(e)}")
+
+                        # Get budget from project page
+                        budget = ""
+                        log_agent_action("Agent A", f"💰 [SELENIUM] Extracting budget from project page...")
+                        try:
+                            budget_selectors = [
+                                ".wants-card__header-price",
+                                "[class*='price-text']",
+                                "[class*='budget']",
+                                "[data-test-id='task-price']",
+                                ".task__price"
+                            ]
+                            for selector in budget_selectors:
+                                try:
+                                    budget_element = self.driver.find_element(By.CSS_SELECTOR, selector)
+                                    budget = budget_element.text.strip()
+                                    if budget and ('₽' in budget or 'руб' in budget):
+                                        break
+                                except:
+                                    continue
+                            log_agent_action("Agent A", f"✅ [SELENIUM] Budget: {budget}")
+                        except:
+                            log_agent_action("Agent A", f"⚠️ [SELENIUM] Budget not found on project page")
+
+                        # Get proposals count from project page
+                        proposals = 0
+                        log_agent_action("Agent A", f"📊 [SELENIUM] Extracting proposals count from project page...")
+                        try:
+                            page_text = self.driver.page_source
+                            proposals_patterns = [
+                                r'(\d+)\s+предложен',
+                                r'(\d+)\s+предложений',
+                                r'(\d+)\s+отклик',
+                                r'(\d+)\s+откликов',
+                                r'откликов[:\s]+(\d+)'
+                            ]
+                            for pattern in proposals_patterns:
+                                match = re.search(pattern, page_text, re.IGNORECASE)
+                                if match:
+                                    proposals = int(match.group(1))
+                                    break
+                            
+                            # Try CSS selectors
+                            if proposals == 0:
+                                try:
+                                    proposals_selectors = [
+                                        "[class*='responses']",
+                                        "[class*='proposals']",
+                                        "[data-test-id='task-responses']"
+                                    ]
+                                    for selector in proposals_selectors:
+                                        try:
+                                            prop_element = self.driver.find_element(By.CSS_SELECTOR, selector)
+                                            prop_text = prop_element.text
+                                            match = re.search(r'(\d+)', prop_text)
+                                            if match:
+                                                proposals = int(match.group(1))
+                                                break
+                                        except:
+                                            continue
+                                except:
+                                    pass
+                            
+                            log_agent_action("Agent A", f"✅ [SELENIUM] Proposals: {proposals}")
+                        except Exception as e:
+                            log_agent_action("Agent A", f"⚠️ [SELENIUM] Error extracting proposals: {str(e)}")
+
+                        # Get hired count from project page
+                        hired = 0
+                        log_agent_action("Agent A", f"👥 [SELENIUM] Extracting hired count from project page...")
+                        try:
+                            page_text = self.driver.page_source
+                            hired_patterns = [
+                                r'(\d+)\s+исполнител',
+                                r'нанят[:\s]+(\d+)',
+                                r'исполнитель.*нанят'
+                            ]
+                            for pattern in hired_patterns:
+                                match = re.search(pattern, page_text, re.IGNORECASE)
+                                if match:
+                                    if match.lastindex:
+                                        hired = int(match.group(1))
+                                    else:
+                                        hired = 1
+                                    break
+                            
+                            # Check for hired badge/indicator
+                            if hired == 0:
+                                try:
+                                    hired_indicators = [
+                                        "[class*='executor']",
+                                        "[class*='hired']",
+                                        "[data-test-id='task-executor']"
+                                    ]
+                                    for selector in hired_indicators:
+                                        try:
+                                            hired_element = self.driver.find_element(By.CSS_SELECTOR, selector)
+                                            if hired_element:
+                                                hired = 1
+                                                break
+                                        except:
+                                            continue
+                                except:
+                                    pass
+                            
+                            log_agent_action("Agent A", f"✅ [SELENIUM] Hired: {hired}")
+                        except Exception as e:
+                            log_agent_action("Agent A", f"⚠️ [SELENIUM] Error extracting hired: {str(e)}")
+
+                        # Go back to search page
+                        log_agent_action("Agent A", f"🔙 [SELENIUM] Returning to search page...")
+                        self.driver.back()
+                        delay = self.human_delay(2, 3)
+                        log_agent_action("Agent A", f"⏱️ [SELENIUM] Waiting after back navigation: {delay:.2f}s")
+                        
+                        # Wait for search page to reload
+                        try:
+                            WebDriverWait(self.driver, 10).until(
+                                EC.presence_of_element_located((By.CSS_SELECTOR, "h1 a[href*='/projects/']"))
+                            )
+                            log_agent_action("Agent A", f"✅ [SELENIUM] Search page reloaded, ready for next project")
+                        except TimeoutException:
+                            log_agent_action("Agent A", f"⚠️ [SELENIUM] Search page reload timeout, continuing anyway")
+                        
+                    except Exception as e:
+                        log_agent_action("Agent A", f"❌ [SELENIUM] Error navigating to project page: {str(e)}")
+                        # If we can't get to project page, skip this project
+                        continue
+
                     project_data = {
                         "id": project_id,
                         "title": title,
-                        "description": description,  # Full description, not truncated
+                        "description": description,  # FULL description from project page
                         "budget": budget,
-                        "url": url,
-                        "proposals": proposals if proposals is not None else 0,  # Number of proposals
-                        "hired": hired if hired is not None else 0,  # Number of hired freelancers
+                        "url": url,  # Real URL with /view
+                        "proposals": proposals,
+                        "hired": hired,
                         "found_at": datetime.now().isoformat()
                     }
 
                     projects.append(project_data)
-                    log_agent_action("Agent A", f"✅ [SELENIUM] Project {i+1} parsed successfully")
+                    log_agent_action("Agent A", f"✅ [SELENIUM] Project {i+1} parsed successfully with full description ({len(description)} chars)")
 
                     # Human delay between projects
                     delay = self.human_delay(1, 3)
