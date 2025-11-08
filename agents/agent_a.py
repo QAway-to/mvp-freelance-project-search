@@ -224,7 +224,7 @@ class AgentA:
                 try:
                     self.driver.execute_script("window.scrollBy(0, 200);")
                     time.sleep(duration / scroll_steps)
-                except:
+                except Exception:
                     break
 
         time.sleep(duration % 2)  # Remaining time
@@ -289,7 +289,7 @@ class AgentA:
                         if button.is_displayed() and button.is_enabled():
                             log_agent_action("Agent A", f"✅ [SELENIUM] Proposal button found via CSS selector")
                             return True
-            except:
+            except Exception:
                 pass
             
             # If button text exists but element not found, assume it might be available
@@ -477,7 +477,7 @@ class AgentA:
                                             description = '\n'.join(desc_texts)
                                             if len(description) > 100:
                                                 break
-                                except:
+                                except Exception:
                                     continue
                             
                             # Fallback: get all text from main content area
@@ -689,7 +689,7 @@ class AgentA:
                         if "Similarity:" in reason:
                             try:
                                 semantic_score = float(reason.split("Similarity:")[1].strip().split()[0])
-                            except:
+                            except Exception:
                                 pass
                     
                     project["semantic_score"] = semantic_score
