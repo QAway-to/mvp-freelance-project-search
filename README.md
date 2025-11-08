@@ -98,8 +98,10 @@ freelance-mvp/
 - **Name**: `agent-a-kwork-mvp` (или любое имя)
 - **Runtime**: `Python 3`
 - **Build Command**: `pip install -r requirements.txt`
-- **Start Command**: `python main.py`
+- **Start Command**: `uvicorn main:app --host 0.0.0.0 --port $PORT` или `python main.py`
 - **Plan**: `Free` (для тестирования) или `Starter` ($7/месяц для продакшена)
+
+**Важно**: Render автоматически устанавливает переменную `$PORT`, поэтому можно использовать любой из вариантов команды запуска.
 
 ### 4. Настройка переменных окружения
 В разделе "Environment" добавьте все переменные из `env.example`:
