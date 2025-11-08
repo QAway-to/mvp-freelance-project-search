@@ -66,28 +66,88 @@ class AgentA:
         options.add_argument("--disable-web-security")
         options.add_argument("--disable-features=VizDisplayCompositor")
 
-        # Headless for server deployment
-        if config.MODE == "demo":
-            options.add_argument("--headless")
-            log_agent_action("Agent A", "🔧 [SELENIUM] Headless mode enabled")
+        # Headless mode for server deployment (Render/Linux)
+        # Always use headless on server to avoid display issues
+        log_agent_action("Agent A", "🔧 [SELENIUM] Configuring headless mode for server deployment...")
+        options.add_argument("--headless=new")  # Use new headless mode
+        options.add_argument("--disable-gpu")  # Disable GPU acceleration
+        options.add_argument("--disable-software-rasterizer")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--disable-background-timer-throttling")
+        options.add_argument("--disable-backgrounding-occluded-windows")
+        options.add_argument("--disable-renderer-backgrounding")
+        options.add_argument("--disable-features=TranslateUI")
+        options.add_argument("--disable-ipc-flooding-protection")
+        options.add_argument("--window-size=1920,1080")  # Set window size
+        options.add_argument("--start-maximized")
+        # Additional Linux-specific arguments
+        options.add_argument("--disable-setuid-sandbox")
+        options.add_argument("--disable-seccomp-filter-sandbox")
+        options.add_argument("--disable-background-networking")
+        options.add_argument("--disable-default-apps")
+        options.add_argument("--disable-sync")
+        options.add_argument("--metrics-recording-only")
+        options.add_argument("--mute-audio")
+        options.add_argument("--no-first-run")
+        options.add_argument("--safebrowsing-disable-auto-update")
+        options.add_argument("--disable-component-update")
+        
+        # Set binary location if CHROME_BIN env var is set (for Render)
+        chrome_bin = os.getenv("CHROME_BIN") or os.getenv("GOOGLE_CHROME_BIN")
+        if chrome_bin:
+            options.binary_location = chrome_bin
+            log_agent_action("Agent A", f"🔧 [SELENIUM] Using Chrome binary from env: {chrome_bin}")
+        
+        log_agent_action("Agent A", "✅ [SELENIUM] Headless mode configured")
 
         # Create driver - let Selenium Manager handle it
         log_agent_action("Agent A", "🔧 [SELENIUM] Initializing Chrome driver...")
+        
+        # Try multiple Chrome binary locations (common on Render/Linux servers)
+        chrome_paths = [
+            os.getenv("CHROME_BIN"),
+            os.getenv("GOOGLE_CHROME_BIN"),
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/snap/bin/chromium",
+        ]
+        
+        # Find available Chrome binary
+        chrome_found = None
+        if options.binary_location:
+            chrome_found = options.binary_location
+        else:
+            for path in chrome_paths:
+                if path and os.path.exists(path):
+                    chrome_found = path
+                    options.binary_location = path
+                    log_agent_action("Agent A", f"🔧 [SELENIUM] Found Chrome at: {path}")
+                    break
+        
+        if not chrome_found:
+            log_agent_action("Agent A", "⚠️ [SELENIUM] Chrome binary not found in standard locations, Selenium will try to find it")
+        
         try:
             # Selenium 4.15+ has built-in manager
             self.driver = webdriver.Chrome(options=options)
             log_agent_action("Agent A", "✅ [SELENIUM] Chrome driver initialized successfully")
         except Exception as e:
-            log_agent_action("Agent A", f"⚠️ [SELENIUM] Chrome driver setup failed: {e}")
-            # Try with explicit service
+            log_agent_action("Agent A", f"⚠️ [SELENIUM] Chrome driver setup failed: {str(e)[:200]}")
+            # Try with explicit service and log level
             try:
                 log_agent_action("Agent A", "🔧 [SELENIUM] Retrying with explicit service...")
                 service = Service()
+                service.service_args = ['--verbose']  # Enable verbose logging
                 self.driver = webdriver.Chrome(service=service, options=options)
                 log_agent_action("Agent A", "✅ [SELENIUM] Chrome driver initialized with service")
             except Exception as e2:
-                log_agent_action("Agent A", f"❌ [SELENIUM] Service setup also failed: {e2}")
-                raise Exception("Could not setup Chrome driver")
+                error_msg = str(e2)[:500]  # Limit error message length
+                log_agent_action("Agent A", f"❌ [SELENIUM] Service setup also failed: {error_msg}")
+                log_agent_action("Agent A", "💡 [SELENIUM] Tip: Make sure Chrome is installed on the server")
+                log_agent_action("Agent A", "💡 [SELENIUM] On Render, you may need to install Chrome in build command")
+                raise Exception(f"Could not setup Chrome driver: {error_msg}")
 
         # Apply stealth
         log_agent_action("Agent A", "🔧 [SELENIUM] Applying stealth configuration...")
@@ -147,23 +207,10 @@ class AgentA:
             return self._search_real_projects()
 
     def _generate_demo_projects(self) -> List[Dict[str, Any]]:
-        """Generate fake projects for demo mode"""
-        log_agent_action("Agent A", "🎭 [DEMO] Generating fake projects for demo mode...")
-
-        # Simulate browser activity (without actual browser)
-        log_agent_action("Agent A", "🎭 [DEMO] Simulating browser navigation...")
-        delay = self.human_delay()
-        log_agent_action("Agent A", f"⏱️ [DEMO] Human delay: {delay:.2f}s")
-        
-        log_agent_action("Agent A", "🎭 [DEMO] Simulating reading page...")
-        self.simulate_reading()
-        log_agent_action("Agent A", "✅ [DEMO] Reading simulation complete")
-
-        # Demo mode: Return empty list - no fake projects
-        # Real projects should be obtained via MODE=full with browser automation
-        log_agent_action("Agent A", "🎭 [DEMO] Demo mode: Fake projects disabled")
+        """Generate demo projects - DISABLED: Returns empty list"""
+        log_agent_action("Agent A", "🎭 [DEMO] Demo mode: Fake projects are disabled")
         log_agent_action("Agent A", "🎭 [DEMO] To get real projects, set MODE=full and provide Kwork credentials")
-        log_agent_action("Agent A", "🎭 [DEMO] Returning empty list - use MODE=full for real project parsing")
+        log_agent_action("Agent A", "🎭 [DEMO] Agent will only process real projects from Kwork with browser automation")
         return []
 
     def _search_real_projects(self) -> List[Dict[str, Any]]:
