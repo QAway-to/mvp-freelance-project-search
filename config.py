@@ -24,7 +24,7 @@ class Config:
     KWORK_BASE_URL: str = "https://kwork.ru"
     KWORK_PROJECTS_URL: str = f"{KWORK_BASE_URL}/projects"
     # Search keywords - can be comma-separated list or single keyword
-    SEARCH_KEYWORDS: str = os.getenv('SEARCH_KEYWORDS', 'бот, обработка данных, данные')
+    SEARCH_KEYWORDS: str = os.getenv('SEARCH_KEYWORDS', 'бот, данные, скрипт, скрипты, сканер, парсер')
     # Legacy support: if SEARCH_KEYWORD is set, use it
     _legacy_keyword = os.getenv('SEARCH_KEYWORD')
     if _legacy_keyword:

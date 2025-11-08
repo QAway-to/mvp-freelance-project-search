@@ -178,36 +178,36 @@ class AgentA:
         return delay
 
     def _is_title_preliminary_relevant(self, title: str) -> bool:
-        """Preliminary title filtering before detailed parsing - filters out obviously irrelevant projects"""
+        """
+        Preliminary title filtering - only filters out obviously irrelevant projects.
+        Since we're already searching by relevant keywords on Kwork, most results should be relevant.
+        We only filter out clearly unrelated projects (like 'лифт', 'дизайн', etc.).
+        """
         if not title:
             return False
 
         title_lower = title.lower()
 
-        # Must contain at least ONE relevant keyword
-        relevant_indicators = [
-            'бот', 'telegram', 'discord', 'автомат', 'парсер', 'парсинг',
-            'данные', 'data', 'api', 'интеграц', 'автоматиз', 'скрипт',
-            'обработка данных', 'обработка', 'сбор данных', 'анализ данных',
-            'webhook', 'чатбот', 'бот для', 'автобот'
-        ]
-
-        # Must NOT contain irrelevant words (hard filter)
+        # Hard filter: Must NOT contain obviously irrelevant words
+        # These are projects that have nothing to do with bots/data/scripts/parsing
         irrelevant_words = [
-            'дизайн', 'логотип', 'баннер', 'фото', 'видео', 'текст',
-            'копирайт', 'верстка', 'html', 'css', 'фронтенд', 'анимация',
             'лифт', 'проект лифта', 'строительств', 'ремонт', 'мебель',
-            'презентация', 'монтаж', 'графика'
+            'дизайн', 'логотип', 'баннер', 'фото', 'видео', 'монтаж', 'графика',
+            'текст', 'копирайтинг', 'копирайт', 'перевод', 'статья', 'презентация',
+            'верстка', 'html', 'css', 'фронтенд', 'ui/ux', 'анимация',
+            'чертеж', 'чертежи', 'ванна', 'столик', 'выдвижные ящики',  # Example from logs
+            'экспертные тексты', 'блог wordpress'  # Content writing
         ]
 
-        # Check for irrelevant words first (hard filter)
+        # Check for irrelevant words (hard filter)
         has_irrelevant = any(word in title_lower for word in irrelevant_words)
         if has_irrelevant:
             return False
 
-        # Must have at least one relevant indicator
-        has_relevant = any(word in title_lower for word in relevant_indicators)
-        return has_relevant
+        # Since we're already searching by relevant keywords on Kwork,
+        # we assume that most results are relevant unless they contain irrelevant words.
+        # This allows more projects to pass through for detailed evaluation.
+        return True
 
     def simulate_reading(self, duration: int = None):
         """Simulate human reading"""
@@ -346,10 +346,12 @@ class AgentA:
                     log_agent_action("Agent A", f"⚠️ [SELENIUM] Error collecting project {i+1} info: {str(e)}")
                     continue
 
-            log_agent_action("Agent A", f"✅ [SELENIUM] Collected {len(project_info_list)} relevant projects to process")
-            log_agent_action("Agent A", f"🚫 [FILTER] Filtered out {filtered_count} irrelevant projects")
+            log_agent_action("Agent A", f"✅ [SELENIUM] Collected {len(project_info_list)} projects to process")
             if filtered_count > 0:
-                log_agent_action("Agent A", f"📊 [FILTER] Relevance filter efficiency: {len(project_info_list)}/{len(project_info_list) + filtered_count} projects passed")
+                log_agent_action("Agent A", f"🚫 [FILTER] Filtered out {filtered_count} obviously irrelevant projects")
+                log_agent_action("Agent A", f"📊 [FILTER] Filter efficiency: {len(project_info_list)}/{len(project_info_list) + filtered_count} projects passed soft filter")
+            else:
+                log_agent_action("Agent A", f"📊 [FILTER] All {len(project_info_list)} projects passed soft filter (no obvious irrelevant projects)")
 
             # Now process each project by navigating directly to its URL
             log_agent_action("Agent A", f"📊 [SELENIUM] Processing {len(project_info_list)} projects...")
