@@ -9,7 +9,7 @@ import logging
 
 from config import config
 from agents.agent_a import AgentA
-from utils.logger import setup_logging, log_queue
+from utils.logger import setup_logging, log_queue, log_agent_action
 
 # Setup logging
 setup_logging()
@@ -56,9 +56,47 @@ async def stream_logs():
 async def start_agent():
     """Start the agent"""
     try:
+        # Check if agent is already running
+        if agent_a.running:
+            return {
+                "status": "already_running", 
+                "message": "Agent A is already running. Use /agent/stop to stop it first.",
+                "agent_status": agent_a.status
+            }
+        
+        # Start continuous monitoring
         asyncio.create_task(agent_a.run_continuous())
-        return {"status": "started", "message": "Agent A started successfully"}
+        log_agent_action("API", "Agent A start requested via API")
+        return {
+            "status": "started", 
+            "message": "Agent A started successfully",
+            "agent_status": agent_a.status
+        }
     except Exception as e:
+        log_agent_action("API", f"Error starting agent: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+@app.post("/agent/run-session")
+async def run_single_session():
+    """Run a single search session"""
+    try:
+        if agent_a.status == "running":
+            return {
+                "status": "busy",
+                "message": "Agent A is currently running a session. Please wait.",
+                "agent_status": agent_a.status
+            }
+        
+        # Run single session
+        asyncio.create_task(agent_a.run_session())
+        log_agent_action("API", "Single session start requested via API")
+        return {
+            "status": "session_started",
+            "message": "Single search session started",
+            "agent_status": agent_a.status
+        }
+    except Exception as e:
+        log_agent_action("API", f"Error starting session: {str(e)}")
         return {"status": "error", "message": str(e)}
 
 @app.post("/agent/stop")
@@ -73,11 +111,29 @@ async def stop_agent():
 @app.get("/status")
 async def get_status():
     """Get current agent status"""
+    from datetime import datetime
+    
+    session_info = None
+    if agent_a.current_session_start:
+        elapsed = (datetime.now() - agent_a.current_session_start).total_seconds()
+        session_info = {
+            "started_at": agent_a.current_session_start.isoformat(),
+            "elapsed_seconds": round(elapsed, 2),
+            "steps": len(agent_a.session_steps)
+        }
+    
+    # Count suitable projects
+    suitable_count = len([p for p in agent_a.found_projects if p.get('evaluation', {}).get('suitable', False)])
+    
     return {
         "agent_a_status": agent_a.status,
+        "is_running": agent_a.running,
         "mode": config.MODE,
         "last_check": agent_a.last_run_time,
-        "projects_found": len(agent_a.found_projects)
+        "projects_found": len(agent_a.found_projects),
+        "suitable_projects": suitable_count,
+        "current_session": session_info,
+        "search_keyword": config.SEARCH_KEYWORD
     }
 
 @app.post("/webhook/n8n")

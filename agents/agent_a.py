@@ -28,20 +28,25 @@ class AgentA:
         self.last_run_time = None
         self.found_projects: List[Dict[str, Any]] = []
         self.running = False
+        self.current_session_start = None
+        self.current_session_end = None
+        self.session_steps: List[Dict[str, Any]] = []
 
     def setup_driver(self):
         """Setup stealth browser"""
-        log_agent_action("Agent A", "Setting up stealth browser")
+        log_agent_action("Agent A", "🔧 [SELENIUM] Starting browser setup...")
 
         if config.MODE == "demo":
             # In demo mode, skip browser setup entirely
-            log_agent_action("Agent A", "Demo mode: skipping browser setup")
+            log_agent_action("Agent A", "🔧 [SELENIUM] Demo mode: skipping browser setup")
             self.driver = None
             return
 
+        log_agent_action("Agent A", "🔧 [SELENIUM] Creating Chrome options...")
         options = Options()
 
         # Basic options
+        log_agent_action("Agent A", "🔧 [SELENIUM] Configuring Chrome options (no-sandbox, disable-automation)...")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-blink-features=AutomationControlled")
@@ -49,32 +54,42 @@ class AgentA:
         options.add_experimental_option('useAutomationExtension', False)
 
         # Random User-Agent
+        log_agent_action("Agent A", "🔧 [SELENIUM] Generating random User-Agent...")
         ua = UserAgent()
-        options.add_argument(f"--user-agent={ua.random}")
+        user_agent = ua.random
+        options.add_argument(f"--user-agent={user_agent}")
+        log_agent_action("Agent A", f"🔧 [SELENIUM] User-Agent: {user_agent[:50]}...")
 
         # Disable WebRTC
+        log_agent_action("Agent A", "🔧 [SELENIUM] Disabling WebRTC and security features...")
         options.add_argument("--disable-web-security")
         options.add_argument("--disable-features=VizDisplayCompositor")
 
         # Headless for server deployment
         if config.MODE == "demo":
             options.add_argument("--headless")
+            log_agent_action("Agent A", "🔧 [SELENIUM] Headless mode enabled")
 
         # Create driver - let Selenium Manager handle it
+        log_agent_action("Agent A", "🔧 [SELENIUM] Initializing Chrome driver...")
         try:
             # Selenium 4.15+ has built-in manager
             self.driver = webdriver.Chrome(options=options)
+            log_agent_action("Agent A", "✅ [SELENIUM] Chrome driver initialized successfully")
         except Exception as e:
-            log_agent_action("Agent A", f"Chrome driver setup failed: {e}")
+            log_agent_action("Agent A", f"⚠️ [SELENIUM] Chrome driver setup failed: {e}")
             # Try with explicit service
             try:
+                log_agent_action("Agent A", "🔧 [SELENIUM] Retrying with explicit service...")
                 service = Service()
                 self.driver = webdriver.Chrome(service=service, options=options)
+                log_agent_action("Agent A", "✅ [SELENIUM] Chrome driver initialized with service")
             except Exception as e2:
-                log_agent_action("Agent A", f"Service setup also failed: {e2}")
+                log_agent_action("Agent A", f"❌ [SELENIUM] Service setup also failed: {e2}")
                 raise Exception("Could not setup Chrome driver")
 
         # Apply stealth
+        log_agent_action("Agent A", "🔧 [SELENIUM] Applying stealth configuration...")
         try:
             stealth(self.driver,
                     languages=["en-US", "en"],
@@ -83,10 +98,11 @@ class AgentA:
                     webgl_vendor="Intel Inc.",
                     renderer="Intel Iris OpenGL Engine",
                     fix_hairline=True)
+            log_agent_action("Agent A", "✅ [SELENIUM] Stealth configuration applied")
         except Exception as e:
-            log_agent_action("Agent A", f"Stealth setup failed: {e}")
+            log_agent_action("Agent A", f"⚠️ [SELENIUM] Stealth setup failed: {e}")
 
-        log_agent_action("Agent A", "Browser setup complete")
+        log_agent_action("Agent A", "✅ [SELENIUM] Browser setup complete")
 
     def human_delay(self, min_sec: float = None, max_sec: float = None):
         """Human-like delay between actions"""
@@ -131,14 +147,19 @@ class AgentA:
 
     def _generate_demo_projects(self) -> List[Dict[str, Any]]:
         """Generate fake projects for demo mode"""
-        log_agent_action("Agent A", "Demo mode: generating fake projects")
+        log_agent_action("Agent A", "🎭 [DEMO] Generating fake projects for demo mode...")
 
         # Simulate browser activity (without actual browser)
-        log_agent_action("Agent A", "Demo mode: simulating browser navigation")
-        self.human_delay()
+        log_agent_action("Agent A", "🎭 [DEMO] Simulating browser navigation...")
+        delay = self.human_delay()
+        log_agent_action("Agent A", f"⏱️ [DEMO] Human delay: {delay:.2f}s")
+        
+        log_agent_action("Agent A", "🎭 [DEMO] Simulating reading page...")
         self.simulate_reading()
+        log_agent_action("Agent A", "✅ [DEMO] Reading simulation complete")
 
         # Fake projects data - include "бот" keyword for better demo
+        log_agent_action("Agent A", "🎭 [DEMO] Loading demo projects database...")
         fake_projects = [
             {
                 "id": "demo_1",
@@ -183,46 +204,63 @@ class AgentA:
         ]
 
         # Simulate finding projects with delays
+        log_agent_action("Agent A", f"🔍 [DEMO] Processing {min(len(fake_projects), config.MAX_PROJECTS_PER_SESSION)} projects...")
         found_projects = []
         for i, project in enumerate(fake_projects[:config.MAX_PROJECTS_PER_SESSION]):
-            log_agent_action("Agent A", f"Found demo project: {project['title'][:50]}...")
+            log_agent_action("Agent A", f"📄 [DEMO] Project {i+1}/{min(len(fake_projects), config.MAX_PROJECTS_PER_SESSION)}: {project['title'][:50]}...")
+            log_agent_action("Agent A", f"💰 [DEMO] Budget: {project.get('budget', 'N/A')}")
             found_projects.append(project)
-            self.human_delay(1, 3)  # Simulate processing time
+            delay = self.human_delay(1, 3)  # Simulate processing time
+            log_agent_action("Agent A", f"⏱️ [DEMO] Processing delay: {delay:.2f}s")
 
-        log_agent_action("Agent A", f"Demo search complete: {len(found_projects)} projects generated")
+        log_agent_action("Agent A", f"✅ [DEMO] Demo search complete: {len(found_projects)} projects generated and processed")
         return found_projects
 
     def _search_real_projects(self) -> List[Dict[str, Any]]:
         """Real search on Kwork"""
-        log_agent_action("Agent A", "Real search mode: accessing Kwork")
+        log_agent_action("Agent A", "🌐 [SELENIUM] Real search mode: accessing Kwork")
 
         # Navigate to search URL
         search_url = f"{config.KWORK_PROJECTS_URL}?query={config.SEARCH_KEYWORD}"
+        log_agent_action("Agent A", f"🌐 [SELENIUM] Navigating to: {search_url}")
         self.driver.get(search_url)
+        log_agent_action("Agent A", "✅ [SELENIUM] Page loaded successfully")
 
-        self.human_delay()
+        log_agent_action("Agent A", "⏱️ [SELENIUM] Waiting for page to stabilize...")
+        delay = self.human_delay()
+        log_agent_action("Agent A", f"⏱️ [SELENIUM] Human delay: {delay:.2f}s")
+        
+        log_agent_action("Agent A", "👁️ [SELENIUM] Simulating human reading behavior...")
         self.simulate_reading()
+        log_agent_action("Agent A", "✅ [SELENIUM] Reading simulation complete")
 
         projects = []
 
         try:
             # Wait for projects to load
+            log_agent_action("Agent A", "🔍 [SELENIUM] Waiting for project elements to load...")
             WebDriverWait(self.driver, 10).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "h1 a[href*='/projects/']"))
             )
+            log_agent_action("Agent A", "✅ [SELENIUM] Project elements found on page")
 
             # Find all project elements
+            log_agent_action("Agent A", "🔍 [SELENIUM] Searching for project links...")
             project_elements = self.driver.find_elements(By.CSS_SELECTOR, "h1 a[href*='/projects/']")
+            log_agent_action("Agent A", f"✅ [SELENIUM] Found {len(project_elements)} potential projects")
 
-            log_agent_action("Agent A", f"Found {len(project_elements)} potential projects")
-
+            log_agent_action("Agent A", f"📊 [SELENIUM] Processing first {min(len(project_elements), config.MAX_PROJECTS_PER_SESSION)} projects...")
             for i, link_element in enumerate(project_elements[:config.MAX_PROJECTS_PER_SESSION]):
                 try:
+                    log_agent_action("Agent A", f"🔍 [SELENIUM] Parsing project {i+1}/{min(len(project_elements), config.MAX_PROJECTS_PER_SESSION)}...")
+                    
                     # Extract project data
                     title = link_element.text.strip()
                     url = link_element.get_attribute("href")
+                    log_agent_action("Agent A", f"📄 [SELENIUM] Title: {title[:50]}...")
 
                     # Get description (usually in the same container)
+                    log_agent_action("Agent A", f"🔍 [SELENIUM] Extracting description...")
                     project_container = link_element.find_element(By.XPATH, "../../../..")
 
                     # Try different selectors for description
@@ -230,20 +268,24 @@ class AgentA:
                     try:
                         desc_element = project_container.find_element(By.CSS_SELECTOR, ".project-description, .task__description")
                         description = desc_element.text.strip()
+                        log_agent_action("Agent A", f"✅ [SELENIUM] Description extracted: {len(description)} chars")
                     except:
                         # Fallback: get text from container
                         container_text = project_container.text
                         # Remove title and get next meaningful text
                         desc_start = container_text.find(title) + len(title)
                         description = container_text[desc_start:].strip().split('\n')[0][:200]
+                        log_agent_action("Agent A", f"⚠️ [SELENIUM] Using fallback description: {len(description)} chars")
 
                     # Get budget information
+                    log_agent_action("Agent A", f"💰 [SELENIUM] Extracting budget...")
                     budget = ""
                     try:
                         budget_element = project_container.find_element(By.CSS_SELECTOR, "[class*='price'], [class*='budget']")
                         budget = budget_element.text.strip()
+                        log_agent_action("Agent A", f"✅ [SELENIUM] Budget: {budget}")
                     except:
-                        pass
+                        log_agent_action("Agent A", f"⚠️ [SELENIUM] Budget not found")
 
                     project_data = {
                         "id": url.split('/')[-1] if '/' in url else str(i),
@@ -255,30 +297,36 @@ class AgentA:
                     }
 
                     projects.append(project_data)
-                    log_agent_action("Agent A", f"Parsed project: {title[:50]}...")
+                    log_agent_action("Agent A", f"✅ [SELENIUM] Project {i+1} parsed successfully")
 
                     # Human delay between projects
-                    self.human_delay(1, 3)
+                    delay = self.human_delay(1, 3)
+                    log_agent_action("Agent A", f"⏱️ [SELENIUM] Processing delay: {delay:.2f}s")
 
                 except Exception as e:
-                    log_agent_action("Agent A", f"Error parsing project {i}: {str(e)}")
+                    log_agent_action("Agent A", f"❌ [SELENIUM] Error parsing project {i+1}: {str(e)}")
                     continue
 
+            log_agent_action("Agent A", f"✅ [SELENIUM] Successfully parsed {len(projects)} projects")
+
         except TimeoutException:
-            log_agent_action("Agent A", "Timeout waiting for projects to load")
+            log_agent_action("Agent A", "❌ [SELENIUM] Timeout waiting for projects to load (10s)")
         except Exception as e:
-            log_agent_action("Agent A", f"Error during search: {str(e)}")
+            log_agent_action("Agent A", f"❌ [SELENIUM] Error during search: {str(e)}")
 
         return projects
 
     def evaluate_and_notify(self, projects: List[Dict[str, Any]]):
         """Evaluate projects and send notifications"""
-        log_agent_action("Agent A", f"Evaluating {len(projects)} projects")
+        log_agent_action("Agent A", f"📊 [EVALUATION] Starting evaluation of {len(projects)} projects...")
+        log_agent_action("Agent A", f"📊 [EVALUATION] Threshold: {config.EVALUATION_THRESHOLD}")
 
         suitable_projects = []
 
-        for project in projects:
+        for i, project in enumerate(projects):
             try:
+                log_agent_action("Agent A", f"📊 [EVALUATION] Evaluating project {i+1}/{len(projects)}: {project['title'][:50]}...")
+                
                 # Evaluate relevance
                 score, reasons = self.evaluator.evaluate_project(project)
 
@@ -288,26 +336,32 @@ class AgentA:
                     "suitable": score >= config.EVALUATION_THRESHOLD
                 }
 
+                log_agent_action("Agent A", f"📊 [EVALUATION] Score: {score:.2f}/1.0 | Threshold: {config.EVALUATION_THRESHOLD}")
+
                 if project["evaluation"]["suitable"]:
                     suitable_projects.append(project)
-                    log_agent_action("Agent A", f"✅ Suitable project: {project['title'][:50]} (score: {score:.2f})")
+                    log_agent_action("Agent A", f"✅ [EVALUATION] Project APPROVED: {project['title'][:50]}... (score: {score:.2f})")
+                    log_agent_action("Agent A", f"📋 [EVALUATION] Reasons: {', '.join(reasons[:3])}")
 
                     # Send to Telegram if configured
                     if self.telegram:
+                        log_agent_action("Agent A", f"📱 [TELEGRAM] Sending notification for project {i+1}...")
                         asyncio.create_task(self.telegram.send_project_notification(project))
                     
                     # Send to n8n workflow (Agent B)
+                    log_agent_action("Agent A", f"🔗 [N8N] Sending project {i+1} to n8n workflow...")
                     asyncio.create_task(self.send_to_n8n(project))
                 else:
-                    log_agent_action("Agent A", f"❌ Not suitable: {project['title'][:50]} (score: {score:.2f})")
+                    log_agent_action("Agent A", f"❌ [EVALUATION] Project REJECTED: {project['title'][:50]}... (score: {score:.2f} < {config.EVALUATION_THRESHOLD})")
 
             except Exception as e:
-                log_agent_action("Agent A", f"Error evaluating project: {str(e)}")
+                log_agent_action("Agent A", f"❌ [EVALUATION] Error evaluating project {i+1}: {str(e)}")
 
         self.found_projects.extend(suitable_projects)
 
         # Summary
-        log_agent_action("Agent A", f"Session complete: {len(suitable_projects)} suitable projects found")
+        log_agent_action("Agent A", f"📈 [EVALUATION] Evaluation complete: {len(suitable_projects)}/{len(projects)} projects approved")
+        log_agent_action("Agent A", f"📈 [EVALUATION] Total suitable projects in history: {len(self.found_projects)}")
 
     async def send_to_n8n(self, project: Dict[str, Any]):
         """Send suitable project to n8n workflow (Agent B)"""
@@ -342,28 +396,53 @@ class AgentA:
 
     async def run_session(self):
         """Run one search session"""
+        session_start = datetime.now()
+        self.current_session_start = session_start
+        self.session_steps = []
+        
+        log_agent_action("Agent A", f"🚀 [SESSION] Starting new search session at {session_start.strftime('%H:%M:%S')}")
+        
         if not self.driver:
+            step_start = datetime.now()
+            log_agent_action("Agent A", "🔧 [SESSION] Setting up browser driver...")
             self.setup_driver()
+            step_duration = (datetime.now() - step_start).total_seconds()
+            log_agent_action("Agent A", f"⏱️ [SESSION] Browser setup completed in {step_duration:.2f}s")
 
         self.status = "running"
         self.last_run_time = datetime.now().isoformat()
 
         try:
-            log_agent_action("Agent A", "Starting search session")
-
-            # Search projects
+            # Step 1: Search projects
+            step_start = datetime.now()
+            log_agent_action("Agent A", "🔍 [SESSION] Step 1/3: Searching projects...")
             projects = self.search_projects()
+            step_duration = (datetime.now() - step_start).total_seconds()
+            log_agent_action("Agent A", f"✅ [SESSION] Step 1/3 completed: Found {len(projects)} projects in {step_duration:.2f}s")
 
             if projects:
-                # Evaluate and notify
+                # Step 2: Evaluate projects
+                step_start = datetime.now()
+                log_agent_action("Agent A", f"📊 [SESSION] Step 2/3: Evaluating {len(projects)} projects...")
                 self.evaluate_and_notify(projects)
+                step_duration = (datetime.now() - step_start).total_seconds()
+                log_agent_action("Agent A", f"✅ [SESSION] Step 2/3 completed: Evaluation finished in {step_duration:.2f}s")
             else:
-                log_agent_action("Agent A", "No projects found")
+                log_agent_action("Agent A", "⚠️ [SESSION] No projects found in this session")
+
+            # Session summary
+            session_duration = (datetime.now() - session_start).total_seconds()
+            self.current_session_end = datetime.now()
+            log_agent_action("Agent A", f"✅ [SESSION] Session completed in {session_duration:.2f}s")
+            log_agent_action("Agent A", f"📈 [SESSION] Summary: Found {len(projects)} projects, {len([p for p in projects if p.get('evaluation', {}).get('suitable', False)])} suitable")
 
         except Exception as e:
-            log_agent_action("Agent A", f"Session error: {str(e)}")
+            session_duration = (datetime.now() - session_start).total_seconds()
+            log_agent_action("Agent A", f"❌ [SESSION] Session error after {session_duration:.2f}s: {str(e)}")
         finally:
             self.status = "waiting"
+            self.current_session_start = None
+            self.current_session_end = None
 
     async def run_continuous(self):
         """Run continuous monitoring"""

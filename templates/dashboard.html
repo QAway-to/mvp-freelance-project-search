@@ -17,10 +17,21 @@
         </header>
 
         <div class="controls">
-            <button id="start-btn" class="btn btn-primary">▶️ Запустить</button>
+            <button id="start-btn" class="btn btn-primary">▶️ Запустить (Continuous)</button>
+            <button id="run-session-btn" class="btn btn-success">🚀 Запустить одну сессию</button>
             <button id="stop-btn" class="btn btn-danger" disabled>⏹️ Остановить</button>
             <div class="search-info">
                 <span>Ключевое слово: <strong>{{ keyword }}</strong></span>
+            </div>
+        </div>
+        
+        <div class="session-info" id="session-info" style="display: none;">
+            <div class="session-card">
+                <h3>⏱️ Текущая сессия</h3>
+                <div id="session-details">
+                    <p>Время выполнения: <span id="session-time">0s</span></p>
+                    <p>Этап: <span id="session-step">-</span></p>
+                </div>
             </div>
         </div>
 
