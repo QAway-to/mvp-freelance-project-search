@@ -44,6 +44,10 @@ class Config:
     
     # n8n Integration
     N8N_WEBHOOK_URL: Optional[str] = os.getenv('N8N_WEBHOOK_URL')
+    
+    # Gemini AI (for semantic evaluation)
+    GEMINI_API_KEY: Optional[str] = os.getenv('GEMINI_API_KEY')
+    SEMANTIC_SIMILARITY_THRESHOLD: float = float(os.getenv('SEMANTIC_SIMILARITY_THRESHOLD', '0.75'))
 
     # Search limits
     MAX_PROJECTS_PER_SESSION: int = int(os.getenv('MAX_PROJECTS_PER_SESSION', '5'))

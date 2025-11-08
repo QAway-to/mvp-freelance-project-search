@@ -3,8 +3,33 @@ import re
 from config import config
 from utils.logger import log_agent_action
 
+# Try to import semantic evaluator
+try:
+    from evaluation.semantic_evaluator import SemanticEvaluator
+    SEMANTIC_AVAILABLE = True
+except (ImportError, Exception) as e:
+    SEMANTIC_AVAILABLE = False
+    SemanticEvaluator = None
+    log_agent_action("Evaluator", f"⚠️ Semantic evaluator not available: {str(e)}")
+
 class ProjectEvaluator:
     def __init__(self):
+        # Initialize semantic evaluator if available
+        self.semantic_evaluator = None
+        if SEMANTIC_AVAILABLE and SemanticEvaluator and config.GEMINI_API_KEY:
+            try:
+                self.semantic_evaluator = SemanticEvaluator(api_key=config.GEMINI_API_KEY)
+                if not self.semantic_evaluator.initialized:
+                    log_agent_action("Evaluator", "⚠️ Semantic evaluator not initialized - using rule-based evaluation only")
+                    self.semantic_evaluator = None
+            except Exception as e:
+                log_agent_action("Evaluator", f"⚠️ Failed to initialize semantic evaluator: {str(e)}")
+                self.semantic_evaluator = None
+        else:
+            if not config.GEMINI_API_KEY:
+                log_agent_action("Evaluator", "⚠️ GEMINI_API_KEY not set - semantic evaluation disabled")
+            else:
+                log_agent_action("Evaluator", "⚠️ Semantic evaluator not available - using rule-based evaluation only")
         # Keywords for bot-related projects
         self.bot_keywords = {
             'бот', 'telegram', 'discord', 'vkontakte', 'vk', 'telegram bot', 'discord bot',
@@ -113,7 +138,7 @@ class ProjectEvaluator:
 
     def evaluate_project(self, project: Dict[str, Any]) -> Tuple[float, List[str]]:
         """
-        Evaluate project relevance
+        Evaluate project relevance using rule-based + semantic analysis
         Returns: (score, reasons)
         """
         reasons = []
@@ -126,9 +151,42 @@ class ProjectEvaluator:
         # Combine title and description for analysis
         full_text = f"{title} {description}"
 
-        # Check for negative keywords first
-        if self.has_negative_keywords(full_text):
-            return 0.0, ["Contains negative keywords (design, text, etc.)"]
+        # SEMANTIC EVALUATION (first check - most accurate)
+        semantic_relevant = True
+        semantic_similarity = 0.0
+        semantic_verdict = ""
+        
+        if self.semantic_evaluator and self.semantic_evaluator.initialized:
+            try:
+                log_agent_action("Evaluator", f"🤖 [SEMANTIC] Starting semantic evaluation for: {title[:50]}...")
+                semantic_similarity, best_match, semantic_relevant, semantic_verdict = self.semantic_evaluator.evaluate_semantic_relevance(
+                    title=title,
+                    description=description,
+                    threshold=config.SEMANTIC_SIMILARITY_THRESHOLD
+                )
+                
+                if not semantic_relevant:
+                    # If semantic evaluation says it's not relevant, reject immediately
+                    log_agent_action("Evaluator", f"❌ [SEMANTIC] Project rejected by semantic evaluation: {semantic_verdict}")
+                    reasons.append(f"🤖 Semantic: {semantic_verdict}")
+                    reasons.append(f"📊 Similarity: {semantic_similarity:.2f}")
+                    if best_match:
+                        reasons.append(f"🔍 Best match: {best_match[:60]}...")
+                    return 0.0, reasons
+                else:
+                    log_agent_action("Evaluator", f"✅ [SEMANTIC] Project passed semantic evaluation: {semantic_verdict}")
+                    reasons.append(f"🤖 Semantic: {semantic_verdict}")
+                    reasons.append(f"📊 Similarity: {semantic_similarity:.2f}")
+                    # Add semantic similarity to score (weight: 0.4)
+                    score += semantic_similarity * 0.4
+            except Exception as e:
+                log_agent_action("Evaluator", f"⚠️ [SEMANTIC] Semantic evaluation failed: {str(e)[:100]}")
+                # Continue with rule-based evaluation if semantic fails
+
+        # Check for negative keywords (fallback if semantic not available)
+        if not self.semantic_evaluator or not self.semantic_evaluator.initialized:
+            if self.has_negative_keywords(full_text):
+                return 0.0, ["Contains negative keywords (design, text, etc.)"]
 
         # Bot-related keywords (weight: 0.5 - most important)
         # Since we're already searching by "бот", projects are likely relevant
@@ -171,6 +229,9 @@ class ProjectEvaluator:
         score = max(0.0, min(1.0, score))
 
         # Add final score to reasons
-        reasons.insert(0, f"Final score: {score:.2f}")
+        if self.semantic_evaluator and self.semantic_evaluator.initialized:
+            reasons.insert(0, f"🎯 Final score: {score:.2f} (Semantic: {semantic_similarity:.2f} + Rule-based: {score - semantic_similarity * 0.4:.2f})")
+        else:
+            reasons.insert(0, f"🎯 Final score: {score:.2f} (Rule-based only)")
 
         return score, reasons
