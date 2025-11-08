@@ -175,10 +175,12 @@ class ProjectEvaluator:
                     return 0.0, reasons
                 else:
                     log_agent_action("Evaluator", f"✅ [SEMANTIC] Project passed semantic evaluation: {semantic_verdict}")
-                    reasons.append(f"🤖 Semantic: {semantic_verdict}")
-                    reasons.append(f"📊 Similarity: {semantic_similarity:.2f}")
-                    # Add semantic similarity to score (weight: 0.4)
-                    score += semantic_similarity * 0.4
+                    reasons.append(f"🤖 Semantic: ✅ Релевантно (similarity: {semantic_similarity:.2f})")
+                    if best_match:
+                        reasons.append(f"🔍 Best match: {best_match[:60]}...")
+                    # Use semantic similarity as base score (weight: 0.6)
+                    # Semantic evaluation is the primary filter
+                    score = semantic_similarity * 0.6
             except Exception as e:
                 log_agent_action("Evaluator", f"⚠️ [SEMANTIC] Semantic evaluation failed: {str(e)[:100]}")
                 # Continue with rule-based evaluation if semantic fails
@@ -187,51 +189,55 @@ class ProjectEvaluator:
         if not self.semantic_evaluator or not self.semantic_evaluator.initialized:
             if self.has_negative_keywords(full_text):
                 return 0.0, ["Contains negative keywords (design, text, etc.)"]
+        
+        # Rule-based evaluation (adds bonus points if semantic passed, or is primary if semantic not available)
 
-        # Bot-related keywords (weight: 0.5 - most important)
-        # Since we're already searching by "бот", projects are likely relevant
-        bot_score = self.calculate_keyword_score(full_text, self.bot_keywords, 0.5)
+        # Rule-based evaluation adds bonus points (up to 0.4 if semantic passed, or full score if semantic not available)
+        rule_based_max = 0.4 if (self.semantic_evaluator and self.semantic_evaluator.initialized) else 1.0
+        
+        # Bot-related keywords
+        bot_score_weight = 0.2 if (self.semantic_evaluator and self.semantic_evaluator.initialized) else 0.5
+        bot_score = self.calculate_keyword_score(full_text, self.bot_keywords, bot_score_weight)
         score += bot_score
 
-        if bot_score > 0.1:
+        if bot_score > 0.05:
             reasons.append(f"Bot-related keywords found (score: {bot_score:.2f})")
 
-        # Technical keywords (weight: 0.3)
-        tech_score = self.calculate_keyword_score(full_text, self.tech_keywords, 0.3)
+        # Technical keywords
+        tech_score_weight = 0.1 if (self.semantic_evaluator and self.semantic_evaluator.initialized) else 0.3
+        tech_score = self.calculate_keyword_score(full_text, self.tech_keywords, tech_score_weight)
         score += tech_score
 
-        if tech_score > 0.1:
+        if tech_score > 0.05:
             reasons.append(f"Technical keywords found (score: {tech_score:.2f})")
 
-        # Budget evaluation (weight: 0.1)
-        budget_score = self.evaluate_budget(budget) * 0.1
+        # Budget evaluation
+        budget_score_weight = 0.05 if (self.semantic_evaluator and self.semantic_evaluator.initialized) else 0.1
+        budget_score = self.evaluate_budget(budget) * budget_score_weight
         score += budget_score
 
-        if budget_score > 0.05:
+        if budget_score > 0.02:
             reasons.append(f"Reasonable budget (score: {budget_score:.2f})")
 
         # Length bonus - prefer detailed descriptions
         text_length = len(full_text)
         if text_length > 200:
-            score += 0.1
-            reasons.append("Detailed description (+0.1)")
+            length_bonus = 0.05 if (self.semantic_evaluator and self.semantic_evaluator.initialized) else 0.1
+            score += length_bonus
+            reasons.append(f"Detailed description (+{length_bonus})")
         elif text_length > 100:
-            score += 0.05
-            reasons.append("Good description (+0.05)")
-
-        # Bonus for search keyword match in title/description
-        search_keyword = config.SEARCH_KEYWORD.lower()
-        if search_keyword in full_text.lower():
-            score += 0.15  # Direct keyword match bonus
-            reasons.append(f"Contains search keyword '{search_keyword}' (+0.15)")
+            length_bonus = 0.02 if (self.semantic_evaluator and self.semantic_evaluator.initialized) else 0.05
+            score += length_bonus
+            reasons.append(f"Good description (+{length_bonus})")
 
         # Ensure score is between 0 and 1
         score = max(0.0, min(1.0, score))
 
         # Add final score to reasons
         if self.semantic_evaluator and self.semantic_evaluator.initialized:
-            reasons.insert(0, f"🎯 Final score: {score:.2f} (Semantic: {semantic_similarity:.2f} + Rule-based: {score - semantic_similarity * 0.4:.2f})")
+            rule_based_score = score - (semantic_similarity * 0.6)
+            reasons.insert(0, f"🎯 Final score: {score:.2f} (Semantic: {semantic_similarity:.2f}×0.6 + Rule-based: {rule_based_score:.2f})")
         else:
-            reasons.insert(0, f"🎯 Final score: {score:.2f} (Rule-based only)")
+            reasons.insert(0, f"🎯 Final score: {score:.2f} (Rule-based only, semantic disabled)")
 
         return score, reasons
