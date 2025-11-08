@@ -4,7 +4,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import StreamingResponse, Response
+from fastapi.responses import StreamingResponse
 import logging
 
 from config import config
@@ -23,7 +23,8 @@ agent_a = AgentA()
 
 # Log current configuration on startup
 log_agent_action("App", f"🚀 Application started in {config.MODE.upper()} mode")
-log_agent_action("App", f"📋 Search keyword: {config.SEARCH_KEYWORD}")
+log_agent_action("App", f"📋 Search keywords: {', '.join(config.SEARCH_KEYWORDS_LIST)}")
+log_agent_action("App", f"📋 Primary keyword: {config.SEARCH_KEYWORD}")
 
 @app.get("/")
 async def dashboard(request: Request):
@@ -31,56 +32,58 @@ async def dashboard(request: Request):
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "mode": config.MODE,
-        "keyword": config.SEARCH_KEYWORD
+        "keyword": ", ".join(config.SEARCH_KEYWORDS_LIST)
     })
 
-@app.get("/logs")
-async def get_logs():
-    """Get current logs as plain text - simple line-by-line approach"""
-    import json
-    logs = []
-    max_logs = 1000  # Return last 1000 log entries (increased for better visibility)
+@app.get("/logs/stream")
+async def stream_logs():
+    """Server-Sent Events for real-time logs - optimized for streaming"""
+    async def event_generator():
+        while True:
+            try:
+                # Rapidly read all available messages from queue
+                batch = []
+                max_batch = 200  # Read up to 200 messages at once
+                
+                # Collect all available messages immediately
+                while len(batch) < max_batch:
+                    try:
+                        log_message = log_queue.get_nowait()
+                        batch.append(log_message)
+                    except asyncio.QueueEmpty:
+                        break
+                
+                # Send all collected messages one by one (for streaming effect)
+                for log_message in batch:
+                    yield f"data: {log_message}\n\n"
+                    # Minimal delay - just enough to allow browser to process
+                    if len(batch) > 1:
+                        await asyncio.sleep(0.0001)  # Very small delay for streaming
+                
+                # If we sent messages, check again immediately
+                if batch:
+                    continue
+                
+                # No messages available - wait briefly for new messages
+                try:
+                    log_message = await asyncio.wait_for(log_queue.get(), timeout=0.01)
+                    yield f"data: {log_message}\n\n"
+                except asyncio.TimeoutError:
+                    # Send keepalive to maintain connection
+                    yield f": keepalive\n\n"
+                    await asyncio.sleep(0.05)  # Very short wait
+                    
+            except Exception as e:
+                yield f"data: {{\"error\": \"{str(e)}\"}}\n\n"
+                await asyncio.sleep(0.1)
 
-    # Collect all available logs from queue
-    collected = 0
-    temp_logs = []
-    
-    # First, collect all logs into temp list
-    while collected < max_logs:
-        try:
-            log_entry_json = log_queue.get_nowait()
-            temp_logs.append(log_entry_json)
-            collected += 1
-        except asyncio.QueueEmpty:
-            break
-        except Exception as e:
-            break
-
-    # Parse and format logs (most recent first, then reverse)
-    for log_entry_json in reversed(temp_logs[-max_logs:]):  # Keep only last max_logs
-        try:
-            log_entry = json.loads(log_entry_json)
-            message = log_entry.get('message', '')
-
-            # Format as simple text line
-            timestamp = log_entry.get('timestamp', '')[:19]  # YYYY-MM-DDTHH:MM:SS
-            level = log_entry.get('level', 'INFO')
-            logs.append(f"[{timestamp}] {level}: {message}")
-        except Exception as e:
-            logs.append(f"[ERROR] Failed to parse log: {str(e)}")
-
-    # Reverse to show oldest first (chronological order)
-    logs.reverse()
-
-    # Return as plain text with line breaks
-    log_text = "\n".join(logs) if logs else "No logs available yet..."
-
-    return Response(
-        content=log_text,
-        media_type="text/plain; charset=utf-8",
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "X-Content-Type-Options": "nosniff",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
         }
     )
 

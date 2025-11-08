@@ -178,28 +178,36 @@ class AgentA:
         return delay
 
     def _is_title_preliminary_relevant(self, title: str) -> bool:
-        """Preliminary title filtering before detailed evaluation"""
+        """Preliminary title filtering before detailed parsing - filters out obviously irrelevant projects"""
         if not title:
             return False
 
         title_lower = title.lower()
 
-        # Must contain relevant indicators
+        # Must contain at least ONE relevant keyword
         relevant_indicators = [
             'бот', 'telegram', 'discord', 'автомат', 'парсер', 'парсинг',
-            'данные', 'data', 'api', 'интеграц', 'автоматиз', 'скрипт'
+            'данные', 'data', 'api', 'интеграц', 'автоматиз', 'скрипт',
+            'обработка данных', 'обработка', 'сбор данных', 'анализ данных',
+            'webhook', 'чатбот', 'бот для', 'автобот'
         ]
 
-        # Must NOT contain irrelevant words
+        # Must NOT contain irrelevant words (hard filter)
         irrelevant_words = [
             'дизайн', 'логотип', 'баннер', 'фото', 'видео', 'текст',
-            'копирайт', 'верстка', 'html', 'css', 'фронтенд', 'анимация'
+            'копирайт', 'верстка', 'html', 'css', 'фронтенд', 'анимация',
+            'лифт', 'проект лифта', 'строительств', 'ремонт', 'мебель',
+            'презентация', 'монтаж', 'графика'
         ]
 
-        has_relevant = any(word in title_lower for word in relevant_indicators)
+        # Check for irrelevant words first (hard filter)
         has_irrelevant = any(word in title_lower for word in irrelevant_words)
+        if has_irrelevant:
+            return False
 
-        return has_relevant and not has_irrelevant
+        # Must have at least one relevant indicator
+        has_relevant = any(word in title_lower for word in relevant_indicators)
+        return has_relevant
 
     def simulate_reading(self, duration: int = None):
         """Simulate human reading"""
@@ -221,8 +229,9 @@ class AgentA:
         time.sleep(duration % 2)  # Remaining time
 
     def search_projects(self) -> List[Dict[str, Any]]:
-        """Search for projects with keyword"""
-        log_agent_action("Agent A", f"Searching projects with keyword: {config.SEARCH_KEYWORD}")
+        """Search for projects with keywords"""
+        keywords_str = ", ".join(config.SEARCH_KEYWORDS_LIST)
+        log_agent_action("Agent A", f"Searching projects with keywords: {keywords_str}")
 
         if config.MODE == "demo":
             # Demo mode: generate fake projects
@@ -242,8 +251,14 @@ class AgentA:
         """Real search on Kwork"""
         log_agent_action("Agent A", "🌐 [SELENIUM] Real search mode: accessing Kwork")
 
-        # Navigate to search URL
-        search_url = f"{config.KWORK_PROJECTS_URL}?query={config.SEARCH_KEYWORD}"
+        # Use first keyword for primary search (Kwork URL supports single query param)
+        # We'll filter results by all keywords later
+        primary_keyword = config.SEARCH_KEYWORD
+        log_agent_action("Agent A", f"📋 [SELENIUM] Using primary keyword for search: '{primary_keyword}'")
+        log_agent_action("Agent A", f"📋 [SELENIUM] All keywords for filtering: {', '.join(config.SEARCH_KEYWORDS_LIST)}")
+
+        # Navigate to search URL (Kwork uses single query parameter)
+        search_url = f"{config.KWORK_PROJECTS_URL}?query={primary_keyword}"
         log_agent_action("Agent A", f"🌐 [SELENIUM] Navigating to: {search_url}")
         self.driver.get(search_url)
         log_agent_action("Agent A", "✅ [SELENIUM] Page loaded successfully")
@@ -274,17 +289,21 @@ class AgentA:
 
             # First, collect all URLs and titles from the list page (before navigation)
             project_info_list = []
+            filtered_count = 0
             log_agent_action("Agent A", "📋 [SELENIUM] Collecting project URLs and titles from list page...")
-            for i, link_element in enumerate(project_elements[:config.MAX_PROJECTS_PER_SESSION]):
+            log_agent_action("Agent A", f"🔍 [FILTER] Applying preliminary relevance filter based on: {', '.join(config.SEARCH_KEYWORDS_LIST)}")
+            
+            for i, link_element in enumerate(project_elements):
                 try:
                     title = link_element.text.strip()
                     url = link_element.get_attribute("href")
-
+                    
                     # PRELIMINARY TITLE FILTERING - skip obviously irrelevant projects
                     if not self._is_title_preliminary_relevant(title):
-                        log_agent_action("Agent A", f"🚫 [FILTER] Skipped irrelevant project {i+1}: {title[:50]}...")
-                        continue
-
+                        filtered_count += 1
+                        log_agent_action("Agent A", f"🚫 [FILTER] Skipped irrelevant project {i+1}: {title[:60]}...")
+                        continue  # Skip this project
+                    
                     # Ensure URL has /view suffix for correct endpoint
                     if url and '/projects/' in url:
                         # Remove query parameters if any
@@ -296,7 +315,7 @@ class AgentA:
                                 url = url.rstrip('/') + '/view'
                             else:
                                 url = url + '/view'
-
+                    
                     # Extract project ID from URL
                     project_id = ""
                     if '/' in url:
@@ -308,19 +327,29 @@ class AgentA:
                             project_id = last_part.split('?')[0]
                     else:
                         project_id = str(i)
-
+                    
                     project_info_list.append({
                         "id": project_id,
                         "title": title,
                         "url": url,
                         "index": i + 1
                     })
-                    log_agent_action("Agent A", f"📋 [SELENIUM] Collected relevant project {i+1}: {title[:50]}... -> {url}")
+                    log_agent_action("Agent A", f"✅ [FILTER] Accepted relevant project {len(project_info_list)+1}: {title[:60]}...")
+                    log_agent_action("Agent A", f"📋 [SELENIUM] Collected project {len(project_info_list)+1}: {title[:50]}... -> {url}")
+                    
+                    # Stop if we have enough projects
+                    if len(project_info_list) >= config.MAX_PROJECTS_PER_SESSION:
+                        log_agent_action("Agent A", f"📊 [SELENIUM] Reached max projects limit ({config.MAX_PROJECTS_PER_SESSION}), stopping collection")
+                        break
+                        
                 except Exception as e:
                     log_agent_action("Agent A", f"⚠️ [SELENIUM] Error collecting project {i+1} info: {str(e)}")
                     continue
 
-            log_agent_action("Agent A", f"✅ [SELENIUM] Collected {len(project_info_list)} relevant projects to process (filtered from {min(len(project_elements), config.MAX_PROJECTS_PER_SESSION)})")
+            log_agent_action("Agent A", f"✅ [SELENIUM] Collected {len(project_info_list)} relevant projects to process")
+            log_agent_action("Agent A", f"🚫 [FILTER] Filtered out {filtered_count} irrelevant projects")
+            if filtered_count > 0:
+                log_agent_action("Agent A", f"📊 [FILTER] Relevance filter efficiency: {len(project_info_list)}/{len(project_info_list) + filtered_count} projects passed")
 
             # Now process each project by navigating directly to its URL
             log_agent_action("Agent A", f"📊 [SELENIUM] Processing {len(project_info_list)} projects...")
@@ -572,22 +601,17 @@ class AgentA:
 
     def evaluate_and_notify(self, projects: List[Dict[str, Any]]):
         """Evaluate projects and send notifications"""
-        total_projects = len(projects)
-        log_agent_action("Agent A", f"📊 [EVALUATION] Starting evaluation of {total_projects} projects...")
+        log_agent_action("Agent A", f"📊 [EVALUATION] Starting evaluation of {len(projects)} projects...")
         log_agent_action("Agent A", f"📊 [EVALUATION] Threshold: {config.EVALUATION_THRESHOLD}")
-        log_agent_action("Agent A", f"⏱️ [EVALUATION] This may take 1-2 minutes per project (AI evaluation)")
 
         suitable_projects = []
 
         for i, project in enumerate(projects):
             try:
-                project_num = i + 1
-                log_agent_action("Agent A", f"📊 [EVALUATION] ====== Evaluating project {project_num}/{total_projects} ======")
-                log_agent_action("Agent A", f"📋 [EVALUATION] Title: {project['title'][:80]}...")
-                log_agent_action("Agent A", f"📝 [EVALUATION] Description length: {len(project.get('description', ''))} chars")
+                log_agent_action("Agent A", f"📊 [EVALUATION] Evaluating project {i+1}/{len(projects)}: {project['title'][:50]}...")
                 
-                # Evaluate relevance with progress info
-                score, reasons = self.evaluator.evaluate_project(project, project_index=project_num, total_projects=total_projects)
+                # Evaluate relevance
+                score, reasons = self.evaluator.evaluate_project(project)
 
                 project["evaluation"] = {
                     "score": score,
@@ -595,34 +619,31 @@ class AgentA:
                     "suitable": score >= config.EVALUATION_THRESHOLD
                 }
 
-                log_agent_action("Agent A", f"📊 [EVALUATION] Project {project_num}/{total_projects} - Score: {score:.2f}/1.0 | Threshold: {config.EVALUATION_THRESHOLD}")
+                log_agent_action("Agent A", f"📊 [EVALUATION] Score: {score:.2f}/1.0 | Threshold: {config.EVALUATION_THRESHOLD}")
 
                 if project["evaluation"]["suitable"]:
                     suitable_projects.append(project)
-                    log_agent_action("Agent A", f"✅ [EVALUATION] Project {project_num}/{total_projects} APPROVED: {project['title'][:50]}... (score: {score:.2f})")
-                    log_agent_action("Agent A", f"📋 [EVALUATION] Top reasons: {', '.join(reasons[:2])}")
+                    log_agent_action("Agent A", f"✅ [EVALUATION] Project APPROVED: {project['title'][:50]}... (score: {score:.2f})")
+                    log_agent_action("Agent A", f"📋 [EVALUATION] Reasons: {', '.join(reasons[:3])}")
 
                     # Send to Telegram if configured
                     if self.telegram:
-                        log_agent_action("Agent A", f"📱 [TELEGRAM] Sending notification for project {project_num}...")
+                        log_agent_action("Agent A", f"📱 [TELEGRAM] Sending notification for project {i+1}...")
                         asyncio.create_task(self.telegram.send_project_notification(project))
                     
                     # Send to n8n workflow (Agent B)
-                    log_agent_action("Agent A", f"🔗 [N8N] Sending project {project_num} to n8n workflow...")
+                    log_agent_action("Agent A", f"🔗 [N8N] Sending project {i+1} to n8n workflow...")
                     asyncio.create_task(self.send_to_n8n(project))
                 else:
-                    log_agent_action("Agent A", f"❌ [EVALUATION] Project {project_num}/{total_projects} REJECTED: {project['title'][:50]}... (score: {score:.2f} < {config.EVALUATION_THRESHOLD})")
-
-                log_agent_action("Agent A", f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                    log_agent_action("Agent A", f"❌ [EVALUATION] Project REJECTED: {project['title'][:50]}... (score: {score:.2f} < {config.EVALUATION_THRESHOLD})")
 
             except Exception as e:
-                log_agent_action("Agent A", f"❌ [EVALUATION] Error evaluating project {i+1}: {str(e)[:200]}")
+                log_agent_action("Agent A", f"❌ [EVALUATION] Error evaluating project {i+1}: {str(e)}")
 
         self.found_projects.extend(suitable_projects)
 
         # Summary
-        log_agent_action("Agent A", f"📈 [EVALUATION] ====== Evaluation Complete ======")
-        log_agent_action("Agent A", f"📈 [EVALUATION] Approved: {len(suitable_projects)}/{total_projects} projects")
+        log_agent_action("Agent A", f"📈 [EVALUATION] Evaluation complete: {len(suitable_projects)}/{len(projects)} projects approved")
         log_agent_action("Agent A", f"📈 [EVALUATION] Total suitable projects in history: {len(self.found_projects)}")
 
     async def send_to_n8n(self, project: Dict[str, Any]):

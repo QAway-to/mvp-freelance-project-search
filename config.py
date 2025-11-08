@@ -1,5 +1,5 @@
 import os
-from typing import Optional
+from typing import Optional, List
 from dotenv import load_dotenv
 
 # Try to load .env file, but don't fail if it doesn't exist
@@ -23,7 +23,16 @@ class Config:
     # Kwork settings
     KWORK_BASE_URL: str = "https://kwork.ru"
     KWORK_PROJECTS_URL: str = f"{KWORK_BASE_URL}/projects"
-    SEARCH_KEYWORD: str = os.getenv('SEARCH_KEYWORD', 'бот')
+    # Search keywords - can be comma-separated list or single keyword
+    SEARCH_KEYWORDS: str = os.getenv('SEARCH_KEYWORDS', 'бот, обработка данных, данные')
+    # Legacy support: if SEARCH_KEYWORD is set, use it
+    _legacy_keyword = os.getenv('SEARCH_KEYWORD')
+    if _legacy_keyword:
+        SEARCH_KEYWORDS = _legacy_keyword
+    # Parse keywords into list (split by comma, strip whitespace)
+    SEARCH_KEYWORDS_LIST: List[str] = [kw.strip() for kw in SEARCH_KEYWORDS.split(',') if kw.strip()]
+    # Primary keyword for logging (first one)
+    SEARCH_KEYWORD: str = SEARCH_KEYWORDS_LIST[0] if SEARCH_KEYWORDS_LIST else 'бот'
 
     # Credentials
     KWORK_EMAIL: Optional[str] = os.getenv('KWORK_EMAIL')
@@ -32,10 +41,7 @@ class Config:
     # Telegram
     TELEGRAM_BOT_TOKEN: Optional[str] = os.getenv('TELEGRAM_BOT_TOKEN')
     TELEGRAM_CHANNEL_ID: Optional[str] = os.getenv('TELEGRAM_CHANNEL_ID')
-
-    # Gemini AI
-    GEMINI_API_KEY: Optional[str] = os.getenv('GEMINI_API_KEY')
-
+    
     # n8n Integration
     N8N_WEBHOOK_URL: Optional[str] = os.getenv('N8N_WEBHOOK_URL')
 

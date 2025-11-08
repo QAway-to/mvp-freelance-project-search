@@ -37,41 +37,41 @@ class Dashboard {
     }
 
     startLogStream() {
-        // Use simple polling instead of SSE for reliable line-by-line display
-        this.logInterval = setInterval(() => {
-            this.fetchLogs();
-        }, 1000); // Update every second
+        this.eventSource = new EventSource('/logs/stream');
 
-        // Initial fetch
-        this.fetchLogs();
+        this.eventSource.onmessage = (event) => {
+            try {
+                const logData = JSON.parse(event.data);
+                this.addLogEntry(logData);
+            } catch (e) {
+                console.error('Error parsing log data:', e);
+            }
+        };
+
+        this.eventSource.onerror = (error) => {
+            console.error('EventSource error:', error);
+            this.addLogEntry({
+                timestamp: new Date().toISOString(),
+                level: 'ERROR',
+                message: 'Connection to log stream lost. Retrying...',
+                module: 'dashboard'
+            });
+
+            // Auto-reconnect after 5 seconds
+            setTimeout(() => {
+                if (this.eventSource.readyState === EventSource.CLOSED) {
+                    this.startLogStream();
+                }
+            }, 5000);
+        };
 
         // Initial connection message
         this.addLogEntry({
             timestamp: new Date().toISOString(),
             level: 'INFO',
-            message: 'Dashboard connected to log polling',
+            message: 'Dashboard connected to log stream',
             module: 'dashboard'
         });
-    }
-
-    async fetchLogs() {
-        try {
-            const response = await fetch('/logs');
-            if (response.ok) {
-                const logText = await response.text();
-                this.updateLogsDisplay(logText);
-            }
-        } catch (error) {
-            console.error('Error fetching logs:', error);
-        }
-    }
-
-    updateLogsDisplay(logText) {
-        // Clear and set new content
-        this.logsContainer.textContent = logText;
-
-        // Auto-scroll to bottom
-        this.logsContainer.scrollTop = this.logsContainer.scrollHeight;
     }
 
     addLogEntry(logData) {
@@ -342,19 +342,18 @@ class Dashboard {
     }
 
     clearLogs() {
-        // Clear logs display
-        this.logsContainer.textContent = '';
-
-        // Add cleared message
-        this.logsContainer.textContent = `[${new Date().toISOString().slice(0,19)}] INFO: Logs cleared by user\n`;
-
-        // Auto-scroll to bottom
-        this.logsContainer.scrollTop = this.logsContainer.scrollHeight;
+        this.logsContainer.innerHTML = '';
+        this.addLogEntry({
+            timestamp: new Date().toISOString(),
+            level: 'INFO',
+            message: 'Logs cleared',
+            module: 'dashboard'
+        });
     }
 
     destroy() {
-        if (this.logInterval) {
-            clearInterval(this.logInterval);
+        if (this.eventSource) {
+            this.eventSource.close();
         }
     }
 }

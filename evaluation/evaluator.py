@@ -3,36 +3,8 @@ import re
 from config import config
 from utils.logger import log_agent_action
 
-# Safely import Gemini evaluator - don't fail if module is missing
-try:
-    from evaluation.gemini_evaluator import GeminiEvaluator
-    GEMINI_AVAILABLE = True
-except (ImportError, Exception) as e:
-    # Don't log here - logger may not be initialized yet
-    GEMINI_AVAILABLE = False
-    GeminiEvaluator = None
-
 class ProjectEvaluator:
     def __init__(self):
-        # Initialize Gemini AI evaluator safely
-        self.gemini = None
-        try:
-            if GEMINI_AVAILABLE and GeminiEvaluator:
-                try:
-                    self.gemini = GeminiEvaluator()
-                    if not self.gemini.initialized:
-                        log_agent_action("Evaluator", "⚠️ Gemini not initialized - using rule-based evaluation only")
-                        self.gemini = None
-                except Exception as e:
-                    log_agent_action("Evaluator", f"⚠️ Failed to initialize Gemini: {str(e)} - continuing without AI")
-                    self.gemini = None
-            else:
-                log_agent_action("Evaluator", "⚠️ Gemini evaluator not available - using rule-based evaluation only")
-        except Exception as e:
-            # Last resort - don't crash
-            self.gemini = None
-            log_agent_action("Evaluator", f"⚠️ Error setting up Gemini: {str(e)} - using rule-based only")
-
         # Keywords for bot-related projects
         self.bot_keywords = {
             'бот', 'telegram', 'discord', 'vkontakte', 'vk', 'telegram bot', 'discord bot',
@@ -40,25 +12,16 @@ class ProjectEvaluator:
             'api', 'webhook', 'интеграция', 'автоматизировать'
         }
 
-        # Keywords for data processing projects
-        self.data_keywords = {
-            'парсер', 'парсинг', 'данные', 'data', 'обработка данных', 'анализ данных',
-            'api', 'интеграция', 'автоматизация', 'скрипт', 'web scraping', 'сбор данных',
-            'etl', 'база данных', 'database', 'sql', 'mongodb', 'postgresql'
-        }
-
-        # Programming languages/frameworks (expanded)
+        # Programming languages/frameworks
         self.tech_keywords = {
             'python', 'javascript', 'node.js', 'php', 'java', 'c#', 'c++',
-            'telegram api', 'discord.py', 'aiogram', 'telebot', 'vk api',
-            'requests', 'beautifulsoup', 'selenium', 'scrapy', 'pandas', 'numpy'
+            'telegram api', 'discord.py', 'aiogram', 'telebot', 'vk api'
         }
 
         # Negative keywords (exclude these)
         self.negative_keywords = {
             'дизайн', 'логотип', 'баннер', 'фото', 'видео', 'монтаж', 'анимация',
-            'текст', 'копирайтинг', 'перевод', 'статья', 'презентация',
-            'верстка', 'html', 'css', 'фронтенд', 'ui/ux', 'графика'
+            'текст', 'копирайтинг', 'перевод', 'статья', 'презентация'
         }
 
     def clean_text(self, text: str) -> str:
@@ -148,9 +111,9 @@ class ProjectEvaluator:
         except:
             return 0.5
 
-    def evaluate_project(self, project: Dict[str, Any], project_index: int = 0, total_projects: int = 0) -> Tuple[float, List[str]]:
+    def evaluate_project(self, project: Dict[str, Any]) -> Tuple[float, List[str]]:
         """
-        Evaluate project relevance using rule-based + AI semantic analysis
+        Evaluate project relevance
         Returns: (score, reasons)
         """
         reasons = []
@@ -163,91 +126,51 @@ class ProjectEvaluator:
         # Combine title and description for analysis
         full_text = f"{title} {description}"
 
-        # Check for negative keywords first - hard filter
+        # Check for negative keywords first
         if self.has_negative_keywords(full_text):
-            log_agent_action("Evaluator", f"🚫 [RULE] Project {project_index}/{total_projects} rejected: negative keywords")
-            return 0.0, ["❌ Contains negative keywords (design, text, etc.)"]
+            return 0.0, ["Contains negative keywords (design, text, etc.)"]
 
-        log_agent_action("Evaluator", f"📊 [RULE] Starting rule-based evaluation {project_index}/{total_projects}...")
+        # Bot-related keywords (weight: 0.5 - most important)
+        # Since we're already searching by "бот", projects are likely relevant
+        bot_score = self.calculate_keyword_score(full_text, self.bot_keywords, 0.5)
+        score += bot_score
 
-        # RULE-BASED EVALUATION (keyword matching)
-        rule_score = 0.0
-
-        # Bot-related keywords (weight: 0.4)
-        bot_score = self.calculate_keyword_score(full_text, self.bot_keywords, 0.4)
-        rule_score += bot_score
         if bot_score > 0.1:
-            reasons.append(f"🔍 Bot keywords: {bot_score:.2f}")
+            reasons.append(f"Bot-related keywords found (score: {bot_score:.2f})")
 
-        # Data processing keywords (weight: 0.4)
-        data_score = self.calculate_keyword_score(full_text, self.data_keywords, 0.4)
-        rule_score += data_score
-        if data_score > 0.1:
-            reasons.append(f"📊 Data keywords: {data_score:.2f}")
+        # Technical keywords (weight: 0.3)
+        tech_score = self.calculate_keyword_score(full_text, self.tech_keywords, 0.3)
+        score += tech_score
 
-        # Technical keywords (weight: 0.2)
-        tech_score = self.calculate_keyword_score(full_text, self.tech_keywords, 0.2)
-        rule_score += tech_score
         if tech_score > 0.1:
-            reasons.append(f"⚙️ Tech keywords: {tech_score:.2f}")
+            reasons.append(f"Technical keywords found (score: {tech_score:.2f})")
 
         # Budget evaluation (weight: 0.1)
         budget_score = self.evaluate_budget(budget) * 0.1
-        rule_score += budget_score
+        score += budget_score
+
         if budget_score > 0.05:
-            reasons.append(f"💰 Budget: {budget_score:.2f}")
+            reasons.append(f"Reasonable budget (score: {budget_score:.2f})")
 
         # Length bonus - prefer detailed descriptions
         text_length = len(full_text)
         if text_length > 200:
-            rule_score += 0.1
-            reasons.append("📝 Detailed description (+0.1)")
+            score += 0.1
+            reasons.append("Detailed description (+0.1)")
         elif text_length > 100:
-            rule_score += 0.05
-            reasons.append("📝 Good description (+0.05)")
+            score += 0.05
+            reasons.append("Good description (+0.05)")
 
-        # Bonus for search keyword match
+        # Bonus for search keyword match in title/description
         search_keyword = config.SEARCH_KEYWORD.lower()
         if search_keyword in full_text.lower():
-            rule_score += 0.15
-            reasons.append(f"🎯 Contains '{search_keyword}' (+0.15)")
-
-        log_agent_action("Evaluator", f"✅ [RULE] Rule-based evaluation complete: score={rule_score:.2f}")
-
-        # AI SEMANTIC EVALUATION (Gemini) - with progress info
-        ai_score = 0.0
-        if self.gemini:
-            log_agent_action("Evaluator", f"🤖 [AI] Starting AI semantic evaluation {project_index}/{total_projects}...")
-            try:
-                ai_score, ai_reasons = self.gemini.evaluate_project_semantic(project, project_index, total_projects)
-                if ai_score > 0.1:
-                    reasons.extend(ai_reasons)
-                else:
-                    reasons.append("🤖 AI evaluation: neutral/low relevance")
-                log_agent_action("Evaluator", f"✅ [AI] AI evaluation complete: score={ai_score:.2f}")
-            except Exception as e:
-                log_agent_action("Evaluator", f"⚠️ [AI] AI evaluation failed: {str(e)[:100]}")
-                reasons.append("🤖 AI evaluation: failed")
-        else:
-            log_agent_action("Evaluator", "⚠️ [AI] Gemini not available, skipping AI evaluation")
-            ai_score = 0.0
-            reasons.append("🤖 AI evaluation: not available")
-
-        # COMBINE SCORES: Rule-based (60%) + AI (40%)
-        # This gives more weight to rule-based for speed, but AI for accuracy
-        final_score = (rule_score * 0.6) + (ai_score * 0.4)
-
-        # Boost if both rule-based and AI agree
-        if rule_score > 0.3 and ai_score > 0.3:
-            final_score = min(1.0, final_score + 0.1)
-            reasons.append("✅ Rule-based + AI consensus (+0.1)")
+            score += 0.15  # Direct keyword match bonus
+            reasons.append(f"Contains search keyword '{search_keyword}' (+0.15)")
 
         # Ensure score is between 0 and 1
-        final_score = max(0.0, min(1.0, final_score))
+        score = max(0.0, min(1.0, score))
 
-        # Add summary scores
-        reasons.insert(0, f"🎯 Final score: {final_score:.2f} (Rule: {rule_score:.2f} + AI: {ai_score:.2f})")
+        # Add final score to reasons
+        reasons.insert(0, f"Final score: {score:.2f}")
 
-        log_agent_action("Evaluator", f"✅ [EVALUATION] Project {project_index}/{total_projects} evaluation complete: final_score={final_score:.2f}")
-
-        return final_score, reasons
+        return score, reasons
