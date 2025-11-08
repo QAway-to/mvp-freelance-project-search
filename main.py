@@ -171,6 +171,76 @@ async def n8n_webhook(request: Request):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+@app.get("/projects")
+async def get_projects():
+    """Get list of all found projects"""
+    suitable_count = len([p for p in agent_a.found_projects if p.get('evaluation', {}).get('suitable', False)])
+    
+    return {
+        "total": len(agent_a.found_projects),
+        "suitable": suitable_count,
+        "projects": agent_a.found_projects
+    }
+
+@app.get("/projects/suitable")
+async def get_suitable_projects():
+    """Get only suitable projects"""
+    suitable = [p for p in agent_a.found_projects if p.get('evaluation', {}).get('suitable', False)]
+    return {
+        "total": len(suitable),
+        "projects": suitable
+    }
+
+@app.post("/webhook/n8n/projects")
+async def n8n_projects_webhook(request: Request):
+    """Webhook endpoint for n8n to get projects data"""
+    try:
+        data = await request.json()
+        action = data.get("action", "all")  # all, suitable, or specific project_id
+        
+        if action == "suitable":
+            # Return only suitable projects
+            suitable = [p for p in agent_a.found_projects if p.get('evaluation', {}).get('suitable', False)]
+            return {
+                "status": "success",
+                "total": len(suitable),
+                "projects": suitable
+            }
+        elif action == "all":
+            # Return all projects
+            suitable_count = len([p for p in agent_a.found_projects if p.get('evaluation', {}).get('suitable', False)])
+            return {
+                "status": "success",
+                "total": len(agent_a.found_projects),
+                "suitable": suitable_count,
+                "projects": agent_a.found_projects
+            }
+        elif action == "get" and data.get("project_id"):
+            # Return specific project
+            project_id = data.get("project_id")
+            project = next((p for p in agent_a.found_projects if p.get("id") == project_id), None)
+            if project:
+                return {
+                    "status": "success",
+                    "project": project
+                }
+            else:
+                return {
+                    "status": "not_found",
+                    "message": f"Project with ID {project_id} not found"
+                }
+        else:
+            return {
+                "status": "error",
+                "message": "Invalid action. Use 'all', 'suitable', or 'get' with project_id"
+            }
+    except Exception as e:
+        log_agent_action("API", f"Error in n8n projects webhook: {str(e)}")
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint for Railway"""
