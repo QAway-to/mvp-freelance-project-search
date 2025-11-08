@@ -242,19 +242,20 @@ class AgentA:
             )
             log_agent_action("Agent A", "✅ [SELENIUM] Project elements found on page")
 
-            # Find all project elements
+            # Find all project elements and collect URLs/titles first
+            # This avoids stale element reference after navigation
             log_agent_action("Agent A", "🔍 [SELENIUM] Searching for project links...")
             project_elements = self.driver.find_elements(By.CSS_SELECTOR, "h1 a[href*='/projects/']")
             log_agent_action("Agent A", f"✅ [SELENIUM] Found {len(project_elements)} potential projects")
 
-            log_agent_action("Agent A", f"📊 [SELENIUM] Processing first {min(len(project_elements), config.MAX_PROJECTS_PER_SESSION)} projects...")
+            # First, collect all URLs and titles from the list page (before navigation)
+            project_info_list = []
+            log_agent_action("Agent A", "📋 [SELENIUM] Collecting project URLs and titles from list page...")
             for i, link_element in enumerate(project_elements[:config.MAX_PROJECTS_PER_SESSION]):
                 try:
-                    log_agent_action("Agent A", f"🔍 [SELENIUM] Parsing project {i+1}/{min(len(project_elements), config.MAX_PROJECTS_PER_SESSION)}...")
-                    
-                    # Extract basic info from list page
                     title = link_element.text.strip()
                     url = link_element.get_attribute("href")
+                    
                     # Ensure URL has /view suffix for correct endpoint
                     if url and '/projects/' in url:
                         # Remove query parameters if any
@@ -267,9 +268,6 @@ class AgentA:
                             else:
                                 url = url + '/view'
                     
-                    log_agent_action("Agent A", f"📄 [SELENIUM] Title: {title[:50]}...")
-                    log_agent_action("Agent A", f"🔗 [SELENIUM] URL: {url}")
-
                     # Extract project ID from URL
                     project_id = ""
                     if '/' in url:
@@ -281,6 +279,32 @@ class AgentA:
                             project_id = last_part.split('?')[0]
                     else:
                         project_id = str(i)
+                    
+                    project_info_list.append({
+                        "id": project_id,
+                        "title": title,
+                        "url": url,
+                        "index": i + 1
+                    })
+                    log_agent_action("Agent A", f"📋 [SELENIUM] Collected project {i+1}: {title[:50]}... -> {url}")
+                except Exception as e:
+                    log_agent_action("Agent A", f"⚠️ [SELENIUM] Error collecting project {i+1} info: {str(e)}")
+                    continue
+
+            log_agent_action("Agent A", f"✅ [SELENIUM] Collected {len(project_info_list)} projects to process")
+
+            # Now process each project by navigating directly to its URL
+            log_agent_action("Agent A", f"📊 [SELENIUM] Processing {len(project_info_list)} projects...")
+            for project_info in project_info_list:
+                try:
+                    i = project_info["index"]
+                    project_id = project_info["id"]
+                    title = project_info["title"]
+                    url = project_info["url"]
+                    
+                    log_agent_action("Agent A", f"🔍 [SELENIUM] Parsing project {i}/{len(project_info_list)}...")
+                    log_agent_action("Agent A", f"📄 [SELENIUM] Title: {title[:50]}...")
+                    log_agent_action("Agent A", f"🔗 [SELENIUM] URL: {url}")
 
                     # Navigate to project page to get FULL description and details
                     log_agent_action("Agent A", f"🌐 [SELENIUM] Navigating to project page for full details...")
@@ -444,20 +468,8 @@ class AgentA:
                         except Exception as e:
                             log_agent_action("Agent A", f"⚠️ [SELENIUM] Error extracting hired: {str(e)}")
 
-                        # Go back to search page
-                        log_agent_action("Agent A", f"🔙 [SELENIUM] Returning to search page...")
-                        self.driver.back()
-                        delay = self.human_delay(2, 3)
-                        log_agent_action("Agent A", f"⏱️ [SELENIUM] Waiting after back navigation: {delay:.2f}s")
-                        
-                        # Wait for search page to reload
-                        try:
-                            WebDriverWait(self.driver, 10).until(
-                                EC.presence_of_element_located((By.CSS_SELECTOR, "h1 a[href*='/projects/']"))
-                            )
-                            log_agent_action("Agent A", f"✅ [SELENIUM] Search page reloaded, ready for next project")
-                        except TimeoutException:
-                            log_agent_action("Agent A", f"⚠️ [SELENIUM] Search page reload timeout, continuing anyway")
+                        # No need to go back - we'll navigate directly to next project URL
+                        # This avoids stale element issues
                         
                     except Exception as e:
                         log_agent_action("Agent A", f"❌ [SELENIUM] Error navigating to project page: {str(e)}")
@@ -476,14 +488,15 @@ class AgentA:
                     }
 
                     projects.append(project_data)
-                    log_agent_action("Agent A", f"✅ [SELENIUM] Project {i+1} parsed successfully with full description ({len(description)} chars)")
+                    log_agent_action("Agent A", f"✅ [SELENIUM] Project {i}/{len(project_info_list)} parsed successfully with full description ({len(description)} chars)")
 
-                    # Human delay between projects
+                    # Human delay between projects (before navigating to next)
                     delay = self.human_delay(1, 3)
                     log_agent_action("Agent A", f"⏱️ [SELENIUM] Processing delay: {delay:.2f}s")
 
                 except Exception as e:
-                    log_agent_action("Agent A", f"❌ [SELENIUM] Error parsing project {i+1}: {str(e)}")
+                    log_agent_action("Agent A", f"❌ [SELENIUM] Error parsing project {project_info.get('index', '?')}: {str(e)[:200]}")
+                    # Continue to next project - don't break the loop
                     continue
 
             log_agent_action("Agent A", f"✅ [SELENIUM] Successfully parsed {len(projects)} projects")
