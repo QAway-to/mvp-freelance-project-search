@@ -445,13 +445,22 @@ class AgentA:
                         # Wait for page to load
                         delay = self.human_delay(2, 4)
                         log_agent_action("Agent A", f"⏱️ [SELENIUM] Waiting for page stabilization: {delay:.2f}s")
-                        
-                        # CHECK: Is "Предложить услугу" button available?
+                    except Exception as e:
+                        log_agent_action("Agent A", f"❌ [SELENIUM] Error navigating to project page: {str(e)[:200]}")
+                        continue
+                    
+                    # CHECK: Is "Предложить услугу" button available?
+                    try:
                         if not self._check_proposal_button_available():
                             log_agent_action("Agent A", f"⏭️ [SELENIUM] Skipping project (proposal button not available - proposal may already be sent)")
                             continue  # Skip this project - proposal already sent
-                        
-                        log_agent_action("Agent A", f"✅ [SELENIUM] Proposal button available - project is eligible")
+                    except Exception as e:
+                        log_agent_action("Agent A", f"⚠️ [SELENIUM] Error checking proposal button: {str(e)[:100]}")
+                        # Assume button is available if we can't check
+                    
+                    log_agent_action("Agent A", f"✅ [SELENIUM] Proposal button available - project is eligible")
+                    
+                    try:
                         
                         # Get FULL description from project page
                         description = ""
@@ -653,10 +662,14 @@ class AgentA:
                         # Human delay between projects
                         delay = self.human_delay(1, 3)
                         log_agent_action("Agent A", f"⏱️ [SELENIUM] Processing delay: {delay:.2f}s")
-
+                        
                     except Exception as e:
-                        log_agent_action("Agent A", f"❌ [SELENIUM] Error processing project: {str(e)[:200]}")
+                        log_agent_action("Agent A", f"❌ [SELENIUM] Error extracting project data: {str(e)[:200]}")
                         continue
+                        
+                except Exception as e:
+                    log_agent_action("Agent A", f"❌ [SELENIUM] Error processing project: {str(e)[:200]}")
+                    continue
 
             # Move to next page
             page += 1
