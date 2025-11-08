@@ -15,6 +15,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from urllib.parse import quote_plus
 
 from config import config
 from utils.logger import logger, log_agent_action
@@ -247,76 +248,153 @@ class AgentA:
         log_agent_action("Agent A", "🎭 [DEMO] Agent will only process real projects from Kwork with browser automation")
         return []
 
+    def _check_proposal_button_available(self) -> bool:
+        """Check if 'Предложить услугу' button is available on project page"""
+        try:
+            # Check page source for button text
+            page_source = self.driver.page_source.lower()
+            
+            # Look for proposal button text
+            proposal_keywords = ['предложить услугу', 'предложить', 'отправить предложение']
+            has_proposal_text = any(keyword in page_source for keyword in proposal_keywords)
+            
+            if not has_proposal_text:
+                log_agent_action("Agent A", f"⚠️ [SELENIUM] Proposal button text not found (proposal may already be sent)")
+                return False
+            
+            # Try to find button element by various methods
+            try:
+                # Method 1: XPath with text content
+                proposal_button = self.driver.find_element(By.XPATH, 
+                    "//button[contains(translate(text(), 'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ', 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя'), 'предложить услугу')] | " +
+                    "//a[contains(translate(text(), 'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ', 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя'), 'предложить услугу')]")
+                
+                if proposal_button and proposal_button.is_displayed():
+                    # Check if button is enabled (not disabled)
+                    if proposal_button.is_enabled():
+                        log_agent_action("Agent A", f"✅ [SELENIUM] Proposal button found and enabled")
+                        return True
+                    else:
+                        log_agent_action("Agent A", f"⚠️ [SELENIUM] Proposal button found but disabled")
+                        return False
+            except NoSuchElementException:
+                pass
+            
+            # Method 2: Try common button selectors
+            try:
+                buttons = self.driver.find_elements(By.CSS_SELECTOR, "button, a.btn, a[class*='button']")
+                for button in buttons:
+                    button_text = button.text.lower()
+                    if any(keyword in button_text for keyword in proposal_keywords):
+                        if button.is_displayed() and button.is_enabled():
+                            log_agent_action("Agent A", f"✅ [SELENIUM] Proposal button found via CSS selector")
+                            return True
+            except:
+                pass
+            
+            # If button text exists but element not found, assume it might be available
+            # (could be dynamically loaded or hidden)
+            log_agent_action("Agent A", f"⚠️ [SELENIUM] Proposal button text found but element not accessible, assuming available")
+            return True
+            
+        except Exception as e:
+            log_agent_action("Agent A", f"⚠️ [SELENIUM] Error checking proposal button: {str(e)[:100]}")
+            # On error, assume button is available (to be safe)
+            return True
+
     def _search_real_projects(self) -> List[Dict[str, Any]]:
-        """Real search on Kwork"""
+        """Real search on Kwork with pagination, proposal button check, and semantic ranking"""
         log_agent_action("Agent A", "🌐 [SELENIUM] Real search mode: accessing Kwork")
 
-        # Use first keyword for primary search (Kwork URL supports single query param)
-        # We'll filter results by all keywords later
-        primary_keyword = config.SEARCH_KEYWORD
-        log_agent_action("Agent A", f"📋 [SELENIUM] Using primary keyword for search: '{primary_keyword}'")
-        log_agent_action("Agent A", f"📋 [SELENIUM] All keywords for filtering: {', '.join(config.SEARCH_KEYWORDS_LIST)}")
-
-        # Navigate to search URL (Kwork uses single query parameter)
-        search_url = f"{config.KWORK_PROJECTS_URL}?query={primary_keyword}"
-        log_agent_action("Agent A", f"🌐 [SELENIUM] Navigating to: {search_url}")
-        self.driver.get(search_url)
-        log_agent_action("Agent A", "✅ [SELENIUM] Page loaded successfully")
-
-        log_agent_action("Agent A", "⏱️ [SELENIUM] Waiting for page to stabilize...")
-        delay = self.human_delay()
-        log_agent_action("Agent A", f"⏱️ [SELENIUM] Human delay: {delay:.2f}s")
+        # Build search URL with all keywords (comma-separated, URL-encoded)
+        # Format: ?keyword=бот,данные,скрипт&page=1&a=1
+        keywords_str = ','.join(config.SEARCH_KEYWORDS_LIST)
+        keywords_encoded = quote_plus(keywords_str)
         
-        log_agent_action("Agent A", "👁️ [SELENIUM] Simulating human reading behavior...")
-        self.simulate_reading()
-        log_agent_action("Agent A", "✅ [SELENIUM] Reading simulation complete")
+        log_agent_action("Agent A", f"📋 [SELENIUM] Search keywords: {keywords_str}")
+        log_agent_action("Agent A", f"📋 [SELENIUM] Target: Find up to 10 relevant projects with proposal button available, output top 5")
 
-        projects = []
+        # Search parameters
+        max_pages = 3  # Maximum pages to search
+        max_relevant_projects = 10  # Search for up to 10 relevant projects
+        output_limit = 5  # Output top 5 most relevant
+        
+        all_projects = []  # All projects found (with full details)
+        page = 1
+        
+        while page <= max_pages and len(all_projects) < max_relevant_projects:
+            # Build search URL for current page
+            search_url = f"{config.KWORK_PROJECTS_URL}?keyword={keywords_encoded}&page={page}&a=1"
+            log_agent_action("Agent A", f"🌐 [SELENIUM] Navigating to page {page}: {search_url}")
+            
+            try:
+                self.driver.get(search_url)
+                log_agent_action("Agent A", f"✅ [SELENIUM] Page {page} loaded successfully")
+            except Exception as e:
+                log_agent_action("Agent A", f"❌ [SELENIUM] Error loading page {page}: {str(e)}")
+                break
 
-        try:
+            # Wait for page to stabilize
+            if page == 1:
+                log_agent_action("Agent A", f"⏱️ [SELENIUM] Waiting for page {page} to stabilize...")
+                delay = self.human_delay(2, 4)
+                log_agent_action("Agent A", f"⏱️ [SELENIUM] Human delay: {delay:.2f}s")
+                
+                log_agent_action("Agent A", "👁️ [SELENIUM] Simulating human reading behavior...")
+                self.simulate_reading()
+                log_agent_action("Agent A", "✅ [SELENIUM] Reading simulation complete")
+            else:
+                # Shorter delay on subsequent pages
+                delay = self.human_delay(1, 2)
+                log_agent_action("Agent A", f"⏱️ [SELENIUM] Quick scan delay on page {page}: {delay:.2f}s")
+
             # Wait for projects to load
-            log_agent_action("Agent A", "🔍 [SELENIUM] Waiting for project elements to load...")
-            WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "h1 a[href*='/projects/']"))
-            )
-            log_agent_action("Agent A", "✅ [SELENIUM] Project elements found on page")
+            try:
+                log_agent_action("Agent A", f"🔍 [SELENIUM] Waiting for project elements on page {page}...")
+                WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "h1 a[href*='/projects/']"))
+                )
+                log_agent_action("Agent A", f"✅ [SELENIUM] Project elements found on page {page}")
+            except TimeoutException:
+                log_agent_action("Agent A", f"⚠️ [SELENIUM] No projects found on page {page}, stopping pagination")
+                break
 
-            # Find all project elements and collect URLs/titles first
-            # This avoids stale element reference after navigation
-            log_agent_action("Agent A", "🔍 [SELENIUM] Searching for project links...")
+            # Find all project elements on current page
+            log_agent_action("Agent A", f"🔍 [SELENIUM] Searching for project links on page {page}...")
             project_elements = self.driver.find_elements(By.CSS_SELECTOR, "h1 a[href*='/projects/']")
-            log_agent_action("Agent A", f"✅ [SELENIUM] Found {len(project_elements)} potential projects")
+            log_agent_action("Agent A", f"✅ [SELENIUM] Found {len(project_elements)} potential projects on page {page}")
 
-            # First, collect all URLs and titles from the list page (before navigation)
-            project_info_list = []
+            if len(project_elements) == 0:
+                log_agent_action("Agent A", f"⚠️ [SELENIUM] No more projects on page {page}, stopping pagination")
+                break
+
+            # Collect project URLs and titles from current page
+            page_projects = []
             filtered_count = 0
-            log_agent_action("Agent A", "📋 [SELENIUM] Collecting project URLs and titles from list page...")
-            log_agent_action("Agent A", f"🔍 [FILTER] Applying soft filter (only removes obviously irrelevant: лифт, дизайн, текст, etc.)")
+            log_agent_action("Agent A", f"📋 [SELENIUM] Collecting projects from page {page}...")
             
             for i, link_element in enumerate(project_elements):
                 try:
                     title = link_element.text.strip()
                     url = link_element.get_attribute("href")
                     
-                    # PRELIMINARY TITLE FILTERING - skip obviously irrelevant projects
+                    # SOFT FILTERING - only skip obviously irrelevant projects
                     if not self._is_title_preliminary_relevant(title):
                         filtered_count += 1
-                        log_agent_action("Agent A", f"🚫 [FILTER] Skipped irrelevant project {i+1}: {title[:60]}...")
-                        continue  # Skip this project
+                        log_agent_action("Agent A", f"🚫 [FILTER] Skipped irrelevant project: {title[:60]}...")
+                        continue
                     
-                    # Ensure URL has /view suffix for correct endpoint
+                    # Ensure URL has /view suffix
                     if url and '/projects/' in url:
-                        # Remove query parameters if any
                         if '?' in url:
                             url = url.split('?')[0]
-                        # Ensure /view suffix
                         if not url.endswith('/view'):
                             if url.endswith('/'):
                                 url = url.rstrip('/') + '/view'
                             else:
                                 url = url + '/view'
                     
-                    # Extract project ID from URL
+                    # Extract project ID
                     project_id = ""
                     if '/' in url:
                         url_parts = url.split('/')
@@ -326,48 +404,40 @@ class AgentA:
                         else:
                             project_id = last_part.split('?')[0]
                     else:
-                        project_id = str(i)
+                        project_id = f"page{page}_item{i}"
                     
-                    project_info_list.append({
+                    page_projects.append({
                         "id": project_id,
                         "title": title,
                         "url": url,
-                        "index": i + 1
+                        "page": page,
+                        "index_on_page": i + 1
                     })
-                    log_agent_action("Agent A", f"✅ [FILTER] Accepted relevant project {len(project_info_list)+1}: {title[:60]}...")
-                    log_agent_action("Agent A", f"📋 [SELENIUM] Collected project {len(project_info_list)+1}: {title[:50]}... -> {url}")
+                    log_agent_action("Agent A", f"✅ [FILTER] Accepted project from page {page}: {title[:60]}...")
                     
-                    # Stop if we have enough projects
-                    if len(project_info_list) >= config.MAX_PROJECTS_PER_SESSION:
-                        log_agent_action("Agent A", f"📊 [SELENIUM] Reached max projects limit ({config.MAX_PROJECTS_PER_SESSION}), stopping collection")
-                        break
-                        
                 except Exception as e:
-                    log_agent_action("Agent A", f"⚠️ [SELENIUM] Error collecting project {i+1} info: {str(e)}")
+                    log_agent_action("Agent A", f"⚠️ [SELENIUM] Error collecting project info: {str(e)[:100]}")
                     continue
 
-            log_agent_action("Agent A", f"✅ [SELENIUM] Collected {len(project_info_list)} projects to process")
-            if filtered_count > 0:
-                log_agent_action("Agent A", f"🚫 [FILTER] Filtered out {filtered_count} obviously irrelevant projects")
-                log_agent_action("Agent A", f"📊 [FILTER] Filter efficiency: {len(project_info_list)}/{len(project_info_list) + filtered_count} projects passed soft filter")
-            else:
-                log_agent_action("Agent A", f"📊 [FILTER] All {len(project_info_list)} projects passed soft filter (no obvious irrelevant projects)")
-
-            # Now process each project by navigating directly to its URL
-            log_agent_action("Agent A", f"📊 [SELENIUM] Processing {len(project_info_list)} projects...")
-            for project_info in project_info_list:
+            log_agent_action("Agent A", f"📊 [SELENIUM] Page {page}: Found {len(page_projects)} relevant projects (filtered {filtered_count})")
+            
+            # Process each project from current page
+            for project_info in page_projects:
+                if len(all_projects) >= max_relevant_projects:
+                    log_agent_action("Agent A", f"📊 [SELENIUM] Reached max relevant projects limit ({max_relevant_projects}), stopping collection")
+                    break
+                    
                 try:
-                    i = project_info["index"]
                     project_id = project_info["id"]
                     title = project_info["title"]
                     url = project_info["url"]
+                    page_num = project_info["page"]
                     
-                    log_agent_action("Agent A", f"🔍 [SELENIUM] Parsing project {i}/{len(project_info_list)}...")
-                    log_agent_action("Agent A", f"📄 [SELENIUM] Title: {title[:50]}...")
+                    log_agent_action("Agent A", f"🔍 [SELENIUM] Processing project from page {page_num}: {title[:50]}...")
                     log_agent_action("Agent A", f"🔗 [SELENIUM] URL: {url}")
 
-                    # Navigate to project page to get FULL description and details
-                    log_agent_action("Agent A", f"🌐 [SELENIUM] Navigating to project page for full details...")
+                    # Navigate to project page
+                    log_agent_action("Agent A", f"🌐 [SELENIUM] Navigating to project page...")
                     try:
                         self.driver.get(url)
                         log_agent_action("Agent A", f"✅ [SELENIUM] Project page loaded")
@@ -376,11 +446,18 @@ class AgentA:
                         delay = self.human_delay(2, 4)
                         log_agent_action("Agent A", f"⏱️ [SELENIUM] Waiting for page stabilization: {delay:.2f}s")
                         
+                        # CHECK: Is "Предложить услугу" button available?
+                        if not self._check_proposal_button_available():
+                            log_agent_action("Agent A", f"⏭️ [SELENIUM] Skipping project (proposal button not available - proposal may already be sent)")
+                            continue  # Skip this project - proposal already sent
+                        
+                        log_agent_action("Agent A", f"✅ [SELENIUM] Proposal button available - project is eligible")
+                        
                         # Get FULL description from project page
                         description = ""
                         log_agent_action("Agent A", f"📝 [SELENIUM] Extracting FULL description from project page...")
                         try:
-                            # Try multiple selectors for full description on project page
+                            # Try multiple selectors for full description
                             desc_selectors = [
                                 ".wants-card__description-text",
                                 ".task__description",
@@ -395,11 +472,10 @@ class AgentA:
                                 try:
                                     desc_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
                                     if desc_elements:
-                                        # Get text from all matching elements (in case description is split)
                                         desc_texts = [elem.text.strip() for elem in desc_elements if elem.text.strip()]
                                         if desc_texts:
                                             description = '\n'.join(desc_texts)
-                                            if len(description) > 100:  # Valid full description
+                                            if len(description) > 100:
                                                 break
                                 except:
                                     continue
@@ -409,7 +485,6 @@ class AgentA:
                                 try:
                                     main_content = self.driver.find_element(By.CSS_SELECTOR, "main, .content, .container, [class*='wants-card']")
                                     description = main_content.text.strip()
-                                    # Remove title and metadata
                                     if title in description:
                                         desc_start = description.find(title) + len(title)
                                         description = description[desc_start:].strip()
@@ -424,7 +499,6 @@ class AgentA:
                         budget = ""
                         log_agent_action("Agent A", f"💰 [SELENIUM] Extracting budget from project page...")
                         try:
-                            # First try CSS selectors
                             budget_selectors = [
                                 ".wants-card__header-price",
                                 "[class*='price-text']",
@@ -433,7 +507,6 @@ class AgentA:
                                 "[data-test-id='task-price']",
                                 ".task__price",
                                 ".project-price",
-                                "[class*='wants-card'][class*='price']"
                             ]
                             for selector in budget_selectors:
                                 try:
@@ -452,7 +525,6 @@ class AgentA:
                             if not budget:
                                 try:
                                     page_source = self.driver.page_source
-                                    # Look for price patterns: "5000 ₽", "10 000 руб", etc.
                                     price_patterns = [
                                         r'(\d{1,3}(?:\s?\d{3})*)\s*[₽руб]',
                                         r'[₽руб]\s*(\d{1,3}(?:\s?\d{3})*)',
@@ -462,7 +534,6 @@ class AgentA:
                                     for pattern in price_patterns:
                                         matches = re.findall(pattern, page_source, re.IGNORECASE)
                                         if matches:
-                                            # Get first match and format it
                                             price_num = matches[0].replace(' ', '')
                                             budget = f"{price_num} ₽"
                                             break
@@ -486,7 +557,8 @@ class AgentA:
                                 r'(\d+)\s+предложений',
                                 r'(\d+)\s+отклик',
                                 r'(\d+)\s+откликов',
-                                r'откликов[:\s]+(\d+)'
+                                r'откликов[:\s]+(\d+)',
+                                r'предложений[:\s]+(\d+)'
                             ]
                             for pattern in proposals_patterns:
                                 match = re.search(pattern, page_text, re.IGNORECASE)
@@ -527,7 +599,8 @@ class AgentA:
                             hired_patterns = [
                                 r'(\d+)\s+исполнител',
                                 r'нанят[:\s]+(\d+)',
-                                r'исполнитель.*нанят'
+                                r'исполнитель.*нанят',
+                                r'нанято[:\s]+(\d+)'
                             ]
                             for pattern in hired_patterns:
                                 match = re.search(pattern, page_text, re.IGNORECASE)
@@ -561,69 +634,101 @@ class AgentA:
                         except Exception as e:
                             log_agent_action("Agent A", f"⚠️ [SELENIUM] Error extracting hired: {str(e)}")
 
-                        # No need to go back - we'll navigate directly to next project URL
-                        # This avoids stale element issues
-                        
+                        # Create project data
+                        project_data = {
+                            "id": project_id,
+                            "title": title,
+                            "description": description,
+                            "budget": budget,
+                            "url": url,
+                            "proposals": proposals,
+                            "hired": hired,
+                            "found_at": datetime.now().isoformat(),
+                            "page": page_num
+                        }
+
+                        all_projects.append(project_data)
+                        log_agent_action("Agent A", f"✅ [SELENIUM] Project added to collection ({len(all_projects)}/{max_relevant_projects}): {title[:50]}...")
+
+                        # Human delay between projects
+                        delay = self.human_delay(1, 3)
+                        log_agent_action("Agent A", f"⏱️ [SELENIUM] Processing delay: {delay:.2f}s")
+
                     except Exception as e:
-                        log_agent_action("Agent A", f"❌ [SELENIUM] Error navigating to project page: {str(e)}")
-                        # If we can't get to project page, skip this project
+                        log_agent_action("Agent A", f"❌ [SELENIUM] Error processing project: {str(e)[:200]}")
                         continue
 
-                    project_data = {
-                        "id": project_id,
-                        "title": title,
-                        "description": description,  # FULL description from project page
-                        "budget": budget,
-                        "url": url,  # Real URL with /view
-                        "proposals": proposals,
-                        "hired": hired,
-                        "found_at": datetime.now().isoformat()
+            # Move to next page
+            page += 1
+            
+            # Small delay before next page
+            if page <= max_pages and len(all_projects) < max_relevant_projects:
+                delay = self.human_delay(1, 2)
+                log_agent_action("Agent A", f"⏱️ [SELENIUM] Delay before next page: {delay:.2f}s")
+
+        log_agent_action("Agent A", f"✅ [SELENIUM] Collection complete: Found {len(all_projects)} projects with proposal button available")
+        
+        # Now evaluate all projects and rank by semantic similarity
+        if len(all_projects) > 0:
+            log_agent_action("Agent A", f"🤖 [SEMANTIC] Evaluating {len(all_projects)} projects for semantic relevance...")
+            
+            # Evaluate each project and add semantic score
+            evaluated_projects = []
+            for project in all_projects:
+                try:
+                    score, reasons = self.evaluator.evaluate_project(project)
+                    project["evaluation"] = {
+                        "score": score,
+                        "reasons": reasons,
+                        "suitable": score >= config.EVALUATION_THRESHOLD
                     }
-
-                    projects.append(project_data)
-                    log_agent_action("Agent A", f"✅ [SELENIUM] Project {i}/{len(project_info_list)} parsed successfully with full description ({len(description)} chars)")
-
-                    # Human delay between projects (before navigating to next)
-                    delay = self.human_delay(1, 3)
-                    log_agent_action("Agent A", f"⏱️ [SELENIUM] Processing delay: {delay:.2f}s")
-
+                    
+                    # Extract semantic similarity if available
+                    semantic_score = 0.0
+                    for reason in reasons:
+                        if "Similarity:" in reason:
+                            try:
+                                semantic_score = float(reason.split("Similarity:")[1].strip().split()[0])
+                            except:
+                                pass
+                    
+                    project["semantic_score"] = semantic_score
+                    evaluated_projects.append(project)
+                    
                 except Exception as e:
-                    log_agent_action("Agent A", f"❌ [SELENIUM] Error parsing project {project_info.get('index', '?')}: {str(e)[:200]}")
-                    # Continue to next project - don't break the loop
+                    log_agent_action("Agent A", f"⚠️ [EVALUATION] Error evaluating project: {str(e)[:100]}")
                     continue
-
-            log_agent_action("Agent A", f"✅ [SELENIUM] Successfully parsed {len(projects)} projects")
-
-        except TimeoutException:
-            log_agent_action("Agent A", "❌ [SELENIUM] Timeout waiting for projects to load (10s)")
-        except Exception as e:
-            log_agent_action("Agent A", f"❌ [SELENIUM] Error during search: {str(e)}")
-
-        return projects
+            
+            # Sort by semantic score (highest first), then by total score
+            evaluated_projects.sort(key=lambda x: (x.get("semantic_score", 0.0), x.get("evaluation", {}).get("score", 0.0)), reverse=True)
+            
+            # Return top N most relevant projects
+            top_projects = evaluated_projects[:output_limit]
+            log_agent_action("Agent A", f"📊 [SEMANTIC] Selected top {len(top_projects)} most relevant projects out of {len(evaluated_projects)}")
+            
+            return top_projects
+        else:
+            log_agent_action("Agent A", f"⚠️ [SELENIUM] No projects found with proposal button available")
+            return []
 
     def evaluate_and_notify(self, projects: List[Dict[str, Any]]):
-        """Evaluate projects and send notifications"""
-        log_agent_action("Agent A", f"📊 [EVALUATION] Starting evaluation of {len(projects)} projects...")
+        """Evaluate projects and send notifications - projects are already evaluated in _search_real_projects"""
+        log_agent_action("Agent A", f"📊 [EVALUATION] Processing {len(projects)} pre-evaluated projects...")
         log_agent_action("Agent A", f"📊 [EVALUATION] Threshold: {config.EVALUATION_THRESHOLD}")
 
         suitable_projects = []
 
         for i, project in enumerate(projects):
             try:
-                log_agent_action("Agent A", f"📊 [EVALUATION] Evaluating project {i+1}/{len(projects)}: {project['title'][:50]}...")
+                evaluation = project.get("evaluation", {})
+                score = evaluation.get("score", 0.0)
+                reasons = evaluation.get("reasons", [])
+                suitable = evaluation.get("suitable", False)
                 
-                # Evaluate relevance
-                score, reasons = self.evaluator.evaluate_project(project)
-
-                project["evaluation"] = {
-                    "score": score,
-                    "reasons": reasons,
-                    "suitable": score >= config.EVALUATION_THRESHOLD
-                }
-
+                log_agent_action("Agent A", f"📊 [EVALUATION] Project {i+1}/{len(projects)}: {project['title'][:50]}...")
                 log_agent_action("Agent A", f"📊 [EVALUATION] Score: {score:.2f}/1.0 | Threshold: {config.EVALUATION_THRESHOLD}")
 
-                if project["evaluation"]["suitable"]:
+                if suitable:
                     suitable_projects.append(project)
                     log_agent_action("Agent A", f"✅ [EVALUATION] Project APPROVED: {project['title'][:50]}... (score: {score:.2f})")
                     log_agent_action("Agent A", f"📋 [EVALUATION] Reasons: {', '.join(reasons[:3])}")
@@ -640,7 +745,7 @@ class AgentA:
                     log_agent_action("Agent A", f"❌ [EVALUATION] Project REJECTED: {project['title'][:50]}... (score: {score:.2f} < {config.EVALUATION_THRESHOLD})")
 
             except Exception as e:
-                log_agent_action("Agent A", f"❌ [EVALUATION] Error evaluating project {i+1}: {str(e)}")
+                log_agent_action("Agent A", f"❌ [EVALUATION] Error processing project {i+1}: {str(e)}")
 
         self.found_projects.extend(suitable_projects)
 
@@ -700,28 +805,29 @@ class AgentA:
         self.last_run_time = datetime.now().isoformat()
 
         try:
-            # Step 1: Search projects
+            # Step 1: Search projects (includes semantic evaluation and ranking)
             step_start = datetime.now()
-            log_agent_action("Agent A", "🔍 [SESSION] Step 1/3: Searching projects...")
+            log_agent_action("Agent A", "🔍 [SESSION] Step 1/2: Searching and evaluating projects...")
             projects = self.search_projects()
             step_duration = (datetime.now() - step_start).total_seconds()
-            log_agent_action("Agent A", f"✅ [SESSION] Step 1/3 completed: Found {len(projects)} projects in {step_duration:.2f}s")
+            log_agent_action("Agent A", f"✅ [SESSION] Step 1/2 completed: Found {len(projects)} relevant projects in {step_duration:.2f}s")
 
             if projects:
-                # Step 2: Evaluate projects
+                # Step 2: Send notifications for suitable projects
                 step_start = datetime.now()
-                log_agent_action("Agent A", f"📊 [SESSION] Step 2/3: Evaluating {len(projects)} projects...")
+                log_agent_action("Agent A", f"📊 [SESSION] Step 2/2: Sending notifications for {len(projects)} projects...")
                 self.evaluate_and_notify(projects)
                 step_duration = (datetime.now() - step_start).total_seconds()
-                log_agent_action("Agent A", f"✅ [SESSION] Step 2/3 completed: Evaluation finished in {step_duration:.2f}s")
+                log_agent_action("Agent A", f"✅ [SESSION] Step 2/2 completed: Notifications sent in {step_duration:.2f}s")
             else:
-                log_agent_action("Agent A", "⚠️ [SESSION] No projects found in this session")
+                log_agent_action("Agent A", "⚠️ [SESSION] No relevant projects found in this session")
 
             # Session summary
             session_duration = (datetime.now() - session_start).total_seconds()
             self.current_session_end = datetime.now()
             log_agent_action("Agent A", f"✅ [SESSION] Session completed in {session_duration:.2f}s")
-            log_agent_action("Agent A", f"📈 [SESSION] Summary: Found {len(projects)} projects, {len([p for p in projects if p.get('evaluation', {}).get('suitable', False)])} suitable")
+            suitable_count = len([p for p in projects if p.get('evaluation', {}).get('suitable', False)])
+            log_agent_action("Agent A", f"📈 [SESSION] Summary: Found {len(projects)} projects, {suitable_count} suitable")
 
         except Exception as e:
             session_duration = (datetime.now() - session_start).total_seconds()
