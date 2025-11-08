@@ -40,19 +40,39 @@ async def stream_logs():
     async def event_generator():
         while True:
             try:
-                # Get log message from queue with timeout to prevent blocking
+                # Check queue for messages - read all available messages immediately
+                messages_sent = 0
+                max_messages_per_iteration = 100  # Limit to prevent overwhelming
+                
+                while messages_sent < max_messages_per_iteration:
+                    try:
+                        # Try to get message without waiting (non-blocking)
+                        log_message = log_queue.get_nowait()
+                        yield f"data: {log_message}\n\n"
+                        messages_sent += 1
+                        # Very small delay for streaming effect
+                        await asyncio.sleep(0.001)
+                    except asyncio.QueueEmpty:
+                        # No more messages, break and wait
+                        break
+                
+                # If we sent messages, continue immediately (don't wait)
+                if messages_sent > 0:
+                    continue
+                
+                # No messages available, wait a bit then send keepalive
                 try:
-                    log_message = await asyncio.wait_for(log_queue.get(), timeout=0.1)
+                    # Wait with timeout for new message
+                    log_message = await asyncio.wait_for(log_queue.get(), timeout=0.05)
                     yield f"data: {log_message}\n\n"
-                    # Small delay to ensure streaming effect
-                    await asyncio.sleep(0.01)
                 except asyncio.TimeoutError:
-                    # Send keepalive
+                    # Send keepalive to maintain connection
                     yield f": keepalive\n\n"
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.1)  # Short wait before next check
+                    
             except Exception as e:
                 yield f"data: {{\"error\": \"{str(e)}\"}}\n\n"
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.5)
 
     return StreamingResponse(
         event_generator(),

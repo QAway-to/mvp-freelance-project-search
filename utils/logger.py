@@ -22,16 +22,24 @@ class QueueHandler(logging.Handler):
                 "function": record.funcName
             }
 
-            # Try to add to queue without blocking
+            # Simple, non-blocking queue insertion
+            # If queue is full, remove oldest messages
             try:
                 log_queue.put_nowait(json.dumps(log_entry))
             except asyncio.QueueFull:
-                # Remove old message if queue is full
+                # Remove old messages to make room (keep queue size manageable)
+                removed = 0
+                while removed < 50 and not log_queue.empty():
+                    try:
+                        log_queue.get_nowait()
+                        removed += 1
+                    except:
+                        break
+                # Try to add new message
                 try:
-                    log_queue.get_nowait()
                     log_queue.put_nowait(json.dumps(log_entry))
                 except:
-                    pass
+                    pass  # If still full, skip this message
 
         except Exception:
             pass  # Don't let logging errors crash the app

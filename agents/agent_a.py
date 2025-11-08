@@ -364,24 +364,57 @@ class AgentA:
                         budget = ""
                         log_agent_action("Agent A", f"💰 [SELENIUM] Extracting budget from project page...")
                         try:
+                            # First try CSS selectors
                             budget_selectors = [
                                 ".wants-card__header-price",
                                 "[class*='price-text']",
                                 "[class*='budget']",
+                                "[class*='price']",
                                 "[data-test-id='task-price']",
-                                ".task__price"
+                                ".task__price",
+                                ".project-price",
+                                "[class*='wants-card'][class*='price']"
                             ]
                             for selector in budget_selectors:
                                 try:
-                                    budget_element = self.driver.find_element(By.CSS_SELECTOR, selector)
-                                    budget = budget_element.text.strip()
-                                    if budget and ('₽' in budget or 'руб' in budget):
+                                    budget_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                                    for elem in budget_elements:
+                                        budget_text = elem.text.strip()
+                                        if budget_text and (re.search(r'\d', budget_text) or '₽' in budget_text or 'руб' in budget_text.lower()):
+                                            budget = budget_text
+                                            break
+                                    if budget:
                                         break
                                 except:
                                     continue
-                            log_agent_action("Agent A", f"✅ [SELENIUM] Budget: {budget}")
-                        except:
-                            log_agent_action("Agent A", f"⚠️ [SELENIUM] Budget not found on project page")
+                            
+                            # If not found via selectors, try regex in page source
+                            if not budget:
+                                try:
+                                    page_source = self.driver.page_source
+                                    # Look for price patterns: "5000 ₽", "10 000 руб", etc.
+                                    price_patterns = [
+                                        r'(\d{1,3}(?:\s?\d{3})*)\s*[₽руб]',
+                                        r'[₽руб]\s*(\d{1,3}(?:\s?\d{3})*)',
+                                        r'цена[:\s]*(\d{1,3}(?:\s?\d{3})*)',
+                                        r'бюджет[:\s]*(\d{1,3}(?:\s?\d{3})*)'
+                                    ]
+                                    for pattern in price_patterns:
+                                        matches = re.findall(pattern, page_source, re.IGNORECASE)
+                                        if matches:
+                                            # Get first match and format it
+                                            price_num = matches[0].replace(' ', '')
+                                            budget = f"{price_num} ₽"
+                                            break
+                                except Exception as e:
+                                    log_agent_action("Agent A", f"⚠️ [SELENIUM] Error in regex budget search: {str(e)[:100]}")
+                            
+                            if budget:
+                                log_agent_action("Agent A", f"✅ [SELENIUM] Budget: {budget}")
+                            else:
+                                log_agent_action("Agent A", f"⚠️ [SELENIUM] Budget not found on project page")
+                        except Exception as e:
+                            log_agent_action("Agent A", f"⚠️ [SELENIUM] Error extracting budget: {str(e)[:100]}")
 
                         # Get proposals count from project page
                         proposals = 0
