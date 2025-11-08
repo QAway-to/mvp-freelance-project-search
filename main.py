@@ -36,11 +36,18 @@ async def stream_logs():
     async def event_generator():
         while True:
             try:
-                # Get log message from queue
-                log_message = await log_queue.get()
-                yield f"data: {log_message}\n\n"
+                # Get log message from queue with timeout to prevent blocking
+                try:
+                    log_message = await asyncio.wait_for(log_queue.get(), timeout=0.1)
+                    yield f"data: {log_message}\n\n"
+                    # Small delay to ensure streaming effect
+                    await asyncio.sleep(0.01)
+                except asyncio.TimeoutError:
+                    # Send keepalive
+                    yield f": keepalive\n\n"
+                    await asyncio.sleep(0.5)
             except Exception as e:
-                yield f"data: Error: {str(e)}\n\n"
+                yield f"data: {{\"error\": \"{str(e)}\"}}\n\n"
                 await asyncio.sleep(1)
 
     return StreamingResponse(
@@ -49,6 +56,7 @@ async def stream_logs():
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
         }
     )
 
@@ -80,6 +88,15 @@ async def start_agent():
 async def run_single_session():
     """Run a single search session"""
     try:
+        # Check if continuous mode is running
+        if agent_a.running:
+            return {
+                "status": "busy",
+                "message": "Agent A is running in continuous mode. Stop it first.",
+                "agent_status": agent_a.status
+            }
+        
+        # Check if a session is already running
         if agent_a.status == "running":
             return {
                 "status": "busy",

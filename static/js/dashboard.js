@@ -20,10 +20,13 @@ class Dashboard {
 
     init() {
         this.bindEvents();
-        this.startLogStream();
-        this.updateStatus();
-        // Update session info every second
-        setInterval(() => this.updateSessionInfo(), 1000);
+        // Load status immediately on init
+        this.updateStatus().then(() => {
+            // Start log stream after status is loaded
+            this.startLogStream();
+            // Update session info every second
+            setInterval(() => this.updateSessionInfo(), 1000);
+        });
     }
 
     bindEvents() {
@@ -105,7 +108,11 @@ class Dashboard {
         entry.textContent = `${timestamp} │ ${level} │ ${module} ${message}`;
 
         this.logsContainer.appendChild(entry);
-        this.logsContainer.scrollTop = this.logsContainer.scrollHeight;
+        // Auto-scroll to bottom with smooth behavior
+        this.logsContainer.scrollTo({
+            top: this.logsContainer.scrollHeight,
+            behavior: 'smooth'
+        });
 
         // Keep only last 1000 entries to prevent memory issues
         while (this.logsContainer.children.length > 1000) {
@@ -234,6 +241,8 @@ class Dashboard {
                     message: '✅ Continuous agent started successfully',
                     module: 'dashboard'
                 });
+                // Update status to reflect running agent
+                await this.updateStatus();
             } else if (data.status === 'already_running') {
                 this.addLogEntry({
                     timestamp: new Date().toISOString(),
@@ -274,6 +283,8 @@ class Dashboard {
                     message: '🚀 Single session started successfully',
                     module: 'dashboard'
                 });
+                // Update status to reflect running session
+                await this.updateStatus();
             } else if (data.status === 'busy') {
                 this.addLogEntry({
                     timestamp: new Date().toISOString(),
