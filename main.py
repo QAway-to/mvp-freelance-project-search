@@ -1,10 +1,10 @@
 import asyncio
 import os
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, PlainTextResponse
 import logging
 import json
 
@@ -337,6 +337,19 @@ async def generate_mvp(request: Request):
             "status": "error",
             "error": str(e)
         }
+
+@app.get("/logs/file", response_class=PlainTextResponse)
+async def get_log_file():
+    """Download or view the raw log file"""
+    log_path = "logs/app.log"
+    if not os.path.exists(log_path):
+        raise HTTPException(status_code=404, detail="Log file not found")
+        
+    try:
+        with open(log_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading log file: {str(e)}")
 
 @app.get("/health")
 async def health_check():

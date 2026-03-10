@@ -49,12 +49,18 @@ def setup_logging():
     # Create console for Rich output
     console = Console()
 
+    # Ensure logs directory exists
+    log_dir = "logs"
+    import os
+    os.makedirs(log_dir, exist_ok=True)
+    
     # Configure root logger
     logging.basicConfig(
         level=logging.INFO,
-        format="%(message)s",
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[
             RichHandler(console=console, rich_tracebacks=True),
+            logging.FileHandler(f"{log_dir}/app.log", encoding="utf-8"),
             QueueHandler()
         ]
     )
