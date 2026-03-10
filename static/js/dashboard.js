@@ -15,6 +15,11 @@ class Dashboard {
         this.sessionTime = document.getElementById('session-time');
         this.sessionStep = document.getElementById('session-step');
 
+        // MVP generation elements
+        this.projectDescription = document.getElementById('project-description');
+        this.generateMvpBtn = document.getElementById('generate-mvp-btn');
+        this.mvpStatus = document.getElementById('mvp-status');
+
         this.init();
     }
 
@@ -34,6 +39,10 @@ class Dashboard {
         this.runSessionBtn.addEventListener('click', () => this.runSingleSession());
         this.stopBtn.addEventListener('click', () => this.stopAgent());
         this.clearLogsBtn.addEventListener('click', () => this.clearLogs());
+
+        // MVP generation events
+        this.generateMvpBtn.addEventListener('click', () => this.generateMVP());
+        this.projectDescription.addEventListener('input', () => this.updateMVPStatus());
     }
 
     startLogStream() {
@@ -348,6 +357,99 @@ class Dashboard {
             level: 'INFO',
             message: 'Logs cleared',
             module: 'dashboard'
+        });
+    }
+
+    // MVP Generation Methods
+    updateMVPStatus() {
+        const description = this.projectDescription.value.trim();
+        if (description.length === 0) {
+            this.mvpStatus.textContent = 'Выберите описание проекта выше';
+            this.mvpStatus.className = 'mvp-status';
+            this.generateMvpBtn.disabled = true;
+        } else if (description.length < 20) {
+            this.mvpStatus.textContent = 'Описание слишком короткое (минимум 20 символов)';
+            this.mvpStatus.className = 'mvp-status error';
+            this.generateMvpBtn.disabled = true;
+        } else {
+            this.mvpStatus.textContent = 'Готово к генерации MVP';
+            this.mvpStatus.className = 'mvp-status success';
+            this.generateMvpBtn.disabled = false;
+        }
+    }
+
+    async generateMVP() {
+        const description = this.projectDescription.value.trim();
+
+        if (!description || description.length < 20) {
+            this.showMVPError('Описание проекта слишком короткое');
+            return;
+        }
+
+        try {
+            // Update UI
+            this.generateMvpBtn.disabled = true;
+            this.mvpStatus.textContent = 'Генерация MVP...';
+            this.mvpStatus.className = 'mvp-status loading';
+
+            // Send request to generate MVP
+            const response = await fetch('/api/generate-mvp', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    description: description,
+                    timestamp: new Date().toISOString()
+                })
+            });
+
+            const result = await response.json();
+
+            if (response.ok) {
+                this.showMVPSuccess(result);
+            } else {
+                throw new Error(result.error || 'Неизвестная ошибка');
+            }
+
+        } catch (error) {
+            console.error('MVP generation error:', error);
+            this.showMVPError(error.message);
+        } finally {
+            this.generateMvpBtn.disabled = false;
+            this.mvpStatus.className = 'mvp-status';
+        }
+    }
+
+    showMVPSuccess(result) {
+        this.mvpStatus.textContent = `✅ MVP успешно создан! Ссылка: ${result.deployUrl}`;
+        this.mvpStatus.className = 'mvp-status success';
+
+        // Add success log
+        this.addLogEntry({
+            timestamp: new Date().toISOString(),
+            level: 'INFO',
+            message: `🚀 MVP создан: ${result.template} → ${result.deployUrl}`,
+            module: 'MVP'
+        });
+
+        // Clear description after success
+        setTimeout(() => {
+            this.projectDescription.value = '';
+            this.updateMVPStatus();
+        }, 3000);
+    }
+
+    showMVPError(message) {
+        this.mvpStatus.textContent = `❌ Ошибка: ${message}`;
+        this.mvpStatus.className = 'mvp-status error';
+
+        // Add error log
+        this.addLogEntry({
+            timestamp: new Date().toISOString(),
+            level: 'ERROR',
+            message: `❌ MVP generation failed: ${message}`,
+            module: 'MVP'
         });
     }
 

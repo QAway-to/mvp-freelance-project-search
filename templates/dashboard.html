@@ -24,6 +24,28 @@
                 <span>Ключевое слово: <strong>{{ keyword }}</strong></span>
             </div>
         </div>
+
+        <div class="mvp-section">
+            <h2>🚀 Генерация MVP</h2>
+            <div class="mvp-controls">
+                <div class="mvp-input-group">
+                    <label for="project-description">Описание проекта:</label>
+                    <textarea
+                        id="project-description"
+                        placeholder="Опишите проект, например: 'Создать Telegram бота для интернет-магазина одежды с каталогом товаров, корзиной и оформлением заказов'"
+                        rows="3"
+                    ></textarea>
+                </div>
+                <div class="mvp-buttons">
+                    <button id="generate-mvp-btn" class="btn btn-mvp">
+                        🎯 Сгенерировать MVP
+                    </button>
+                    <div id="mvp-status" class="mvp-status">
+                        Выберите описание проекта выше
+                    </div>
+                </div>
+            </div>
+        </div>
         
         <div class="session-info" id="session-info" style="display: none;">
             <div class="session-card">
