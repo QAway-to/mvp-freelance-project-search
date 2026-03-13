@@ -6,8 +6,8 @@ from typing import Dict, Any
 from rich.console import Console
 from rich.logging import RichHandler
 
-# Global log queue for real-time streaming
-log_queue = asyncio.Queue(maxsize=1000)
+# Global log queue for real-time streaming - increased size for detailed logging
+log_queue = asyncio.Queue(maxsize=5000)
 
 class QueueHandler(logging.Handler):
     """Custom handler to send logs to queue"""
@@ -74,7 +74,7 @@ def setup_logging():
 # Global logger instance
 logger = setup_logging()
 
-def log_agent_action(agent: str, action: str, details: Dict[str, Any] = None):
+def log_agent_action(agent: str, action: str, details: Dict[str, Any] = None, level: str = "INFO"):
     """Log agent actions with structured data"""
     message = f"🤖 {agent}: {action}"
 
@@ -82,4 +82,11 @@ def log_agent_action(agent: str, action: str, details: Dict[str, Any] = None):
         details_str = " | ".join(f"{k}: {v}" for k, v in details.items())
         message += f" | {details_str}"
 
-    logger.info(message)
+    if level.upper() == "DEBUG":
+        logger.debug(message)
+    elif level.upper() == "WARNING":
+        logger.warning(message)
+    elif level.upper() == "ERROR":
+        logger.error(message)
+    else:
+        logger.info(message)

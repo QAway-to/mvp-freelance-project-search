@@ -109,7 +109,11 @@ class ProjectEvaluator:
         cleaned_text = self.clean_text(text)
         words = set(cleaned_text.split())
 
-        return len(words.intersection(self.negative_keywords)) > 0
+        negative_matches = words.intersection(self.negative_keywords)
+        if negative_matches:
+            log_agent_action("Evaluator", f"🚫 Found negative keywords: {', '.join(negative_matches)}", level="DEBUG")
+            return True
+        return False
 
     def evaluate_budget(self, budget_text: str) -> float:
         """Evaluate budget suitability (prefer reasonable budgets)"""
@@ -203,7 +207,9 @@ class ProjectEvaluator:
         score += bot_score
 
         if bot_score > 0.05:
-            reasons.append(f"Bot-related keywords found (score: {bot_score:.2f})")
+            matched_bot = [kw for kw in self.bot_keywords if kw.lower() in full_text.lower()]
+            reasons.append(f"Bot-related keywords found: {', '.join(matched_bot)} (score: {bot_score:.2f})")
+            log_agent_action("Evaluator", f"🔍 Bot keywords matched: {', '.join(matched_bot)}", level="DEBUG")
 
         # Technical keywords
         tech_score_weight = 0.1 if (self.semantic_evaluator and self.semantic_evaluator.initialized) else 0.3
@@ -211,7 +217,9 @@ class ProjectEvaluator:
         score += tech_score
 
         if tech_score > 0.05:
-            reasons.append(f"Technical keywords found (score: {tech_score:.2f})")
+            matched_tech = [kw for kw in self.tech_keywords if kw.lower() in full_text.lower()]
+            reasons.append(f"Technical keywords found: {', '.join(matched_tech)} (score: {tech_score:.2f})")
+            log_agent_action("Evaluator", f"🔍 Tech keywords matched: {', '.join(matched_tech)}", level="DEBUG")
 
         # Budget evaluation
         budget_score_weight = 0.05 if (self.semantic_evaluator and self.semantic_evaluator.initialized) else 0.1

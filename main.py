@@ -26,6 +26,8 @@ agent_a = AgentA()
 log_agent_action("App", f"🚀 Application started in {config.MODE.upper()} mode")
 log_agent_action("App", f"📋 Search keywords: {', '.join(config.SEARCH_KEYWORDS_LIST)}")
 log_agent_action("App", f"📋 Primary keyword: {config.SEARCH_KEYWORD}")
+log_agent_action("App", f"📂 Root directory: {os.getcwd()}")
+log_agent_action("App", f"🌐 Chrome Bin path: {os.getenv('CHROME_BIN') or os.getenv('GOOGLE_CHROME_BIN') or 'Not set'}")
 
 @app.get("/")
 async def dashboard(request: Request):
@@ -358,6 +360,7 @@ async def health_check():
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
+    log_agent_action("App", f"📡 Starting server on port {port}")
     uvicorn.run(
         "main:app",
         host="0.0.0.0",

@@ -111,6 +111,12 @@ class Dashboard {
         } else if (message.includes('[TELEGRAM]') || message.includes('[N8N]')) {
             entry.style.color = '#64b5f6';
             entry.style.borderLeftColor = '#64b5f6';
+        } else if (logData.level === 'DEBUG') {
+            entry.style.color = '#757575';
+            entry.style.fontStyle = 'italic';
+        } else if (logData.level === 'ERROR') {
+            entry.style.color = '#ef5350';
+            entry.style.fontWeight = 'bold';
         }
 
         // Format log entry with better spacing

@@ -147,8 +147,11 @@ class AgentA:
             except Exception as e2:
                 error_msg = str(e2)[:500]  # Limit error message length
                 log_agent_action("Agent A", f"❌ [SELENIUM] Service setup also failed: {error_msg}")
-                log_agent_action("Agent A", "💡 [SELENIUM] Tip: Make sure Chrome is installed on the server")
-                log_agent_action("Agent A", "💡 [SELENIUM] On Render, you may need to install Chrome in build command")
+                log_agent_action("Agent A", "💡 [SELENIUM] Tip: Make sure Chrome is installed on the server", level="WARNING")
+                log_agent_action("Agent A", "💡 [SELENIUM] On Windows, ensure Chrome is in PATH or specify location", level="WARNING")
+                # Log environment variables for debugging
+                log_agent_action("Agent A", f"🔍 [DEBUG] GOOGLE_CHROME_BIN: {os.getenv('GOOGLE_CHROME_BIN')}", level="DEBUG")
+                log_agent_action("Agent A", f"🔍 [DEBUG] Current PATH: {os.getenv('PATH')[:100]}...", level="DEBUG")
                 raise Exception(f"Could not setup Chrome driver: {error_msg}")
 
         # Apply stealth
@@ -259,7 +262,10 @@ class AgentA:
             has_proposal_text = any(keyword in page_source for keyword in proposal_keywords)
             
             if not has_proposal_text:
-                log_agent_action("Agent A", f"⚠️ [SELENIUM] Proposal button text not found (proposal may already be sent)")
+                log_agent_action("Agent A", f"⚠️ [SELENIUM] Proposal button text ('предложить услугу') NOT found in page source", level="WARNING")
+                # Log a snippet of the page source for debugging
+                source_snippet = page_source[:500].replace('\n', ' ')
+                log_agent_action("Agent A", f"🔍 [DEBUG] Page source snippet: {source_snippet}...", level="DEBUG")
                 return False
             
             # Try to find button element by various methods
@@ -294,11 +300,11 @@ class AgentA:
             
             # If button text exists but element not found, assume it might be available
             # (could be dynamically loaded or hidden)
-            log_agent_action("Agent A", f"⚠️ [SELENIUM] Proposal button text found but element not accessible, assuming available")
+            log_agent_action("Agent A", f"⚠️ [SELENIUM] Proposal button text exists but element not found by selectors, assuming available as fallback", level="WARNING")
             return True
             
         except Exception as e:
-            log_agent_action("Agent A", f"⚠️ [SELENIUM] Error checking proposal button: {str(e)[:100]}")
+            log_agent_action("Agent A", f"❌ [SELENIUM] Error checking proposal button: {str(e)}", level="ERROR")
             # On error, assume button is available (to be safe)
             return True
 
@@ -330,8 +336,9 @@ class AgentA:
             try:
                 self.driver.get(search_url)
                 log_agent_action("Agent A", f"✅ [SELENIUM] Page {page} loaded successfully")
+                log_agent_action("Agent A", f"🔍 [DEBUG] Current URL: {self.driver.current_url}", level="DEBUG")
             except Exception as e:
-                log_agent_action("Agent A", f"❌ [SELENIUM] Error loading page {page}: {str(e)}")
+                log_agent_action("Agent A", f"❌ [SELENIUM] Error loading page {page}: {str(e)}", level="ERROR")
                 break
 
             # Wait for page to stabilize
