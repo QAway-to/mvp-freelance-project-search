@@ -1,107 +1,94 @@
+import { useState, useMemo } from 'react'
+import ProjectCard from './ProjectCard'
+import { projectsToJson, projectsToCsv, downloadFile } from '../utils/export'
+
+const SORT_OPTIONS = [
+  { value: 'score',    label: 'score' },
+  { value: 'budget',   label: 'budget' },
+  { value: 'timeLeft', label: 'time' },
+]
+
+function parseBudget(str) {
+  if (!str) return 0
+  const num = parseInt(str.replace(/\D/g, ''))
+  return isNaN(num) ? 0 : num
+}
+
 export default function ProjectResults({ projects }) {
-  if (!projects || projects.length === 0) {
-    return null;
+  const [sortBy, setSortBy] = useState('score')
+  const [sortDir, setSortDir] = useState('desc')
+
+  const sorted = useMemo(() => {
+    return [...projects].sort((a, b) => {
+      let av, bv
+      if (sortBy === 'score') {
+        av = a.evaluation?.totalScore ?? 0
+        bv = b.evaluation?.totalScore ?? 0
+      } else if (sortBy === 'budget') {
+        av = parseBudget(a.budget)
+        bv = parseBudget(b.budget)
+      } else {
+        av = a.timeLeft ?? 999
+        bv = b.timeLeft ?? 999
+      }
+      return sortDir === 'desc' ? bv - av : av - bv
+    })
+  }, [projects, sortBy, sortDir])
+
+  const handleSortClick = (value) => {
+    if (sortBy === value) {
+      setSortDir(d => d === 'desc' ? 'asc' : 'desc')
+    } else {
+      setSortBy(value)
+      setSortDir('desc')
+    }
   }
 
-  const getScoreBadge = (score) => {
-    if (!score) return null;
-    
-    let className = 'project-score';
-    if (score >= 0.8) {
-      className += ' score-high';
-    } else if (score >= 0.5) {
-      className += ' score-medium';
-    } else {
-      className += ' score-low';
-    }
+  const handleExportJson = () =>
+    downloadFile('projects.json', projectsToJson(projects), 'application/json')
 
-    return (
-      <span className={className}>
-        Score: {(score * 100).toFixed(0)}%
-      </span>
-    );
-  };
+  const handleExportCsv = () =>
+    downloadFile('projects.csv', projectsToCsv(projects), 'text/csv;charset=utf-8')
 
-  const formatBudget = (budget) => {
-    if (!budget) return 'Not specified';
-    return budget;
-  };
-
-  const formatDate = (dateStr) => {
-    if (!dateStr) return '';
-    try {
-      const date = new Date(dateStr);
-      return date.toLocaleDateString();
-    } catch {
-      return dateStr;
-    }
-  };
+  if (!projects.length) return null
 
   return (
-    <div className="card" style={{ marginTop: '24px' }}>
-      <header className="card-header">
-        <h2>Search Results</h2>
-        <p>Found {projects.length} project(s)</p>
-      </header>
-      <div className="results-list">
-        {projects.map((project, index) => (
-          <div key={index} className="project-card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-              <h3 className="project-title">{project.title || 'Untitled'}</h3>
-              {project.evaluation && getScoreBadge(project.evaluation.totalScore)}
-            </div>
-            
-            {project.description && (
-              <p className="project-description">
-                {project.description.length > 300 
-                  ? `${project.description.substring(0, 300)}...` 
-                  : project.description}
-              </p>
-            )}
-
-            <div className="project-meta">
-              {project.budget && (
-                <span>
-                  <strong>Budget:</strong> {formatBudget(project.budget)}
-                </span>
-              )}
-              {project.url && (
-                <span>
-                  <a href={project.url} target="_blank" rel="noopener noreferrer" style={{ color: '#60a5fa' }}>
-                    View Project
-                  </a>
-                </span>
-              )}
-              {project.evaluation && (
-                <>
-                  {project.evaluation.relevanceScore !== undefined && (
-                    <span>
-                      <strong>Relevance:</strong> {(project.evaluation.relevanceScore * 100).toFixed(0)}%
-                    </span>
-                  )}
-                  {project.evaluation.timeScore !== undefined && (
-                    <span>
-                      <strong>Time Score:</strong> {(project.evaluation.timeScore * 100).toFixed(0)}%
-                    </span>
-                  )}
-                  {project.evaluation.proposalsScore !== undefined && (
-                    <span>
-                      <strong>Proposals Score:</strong> {(project.evaluation.proposalsScore * 100).toFixed(0)}%
-                    </span>
-                  )}
-                </>
-              )}
-            </div>
-
-            {project.evaluation && project.evaluation.reasoning && (
-              <div style={{ marginTop: '12px', padding: '12px', background: 'rgba(15, 23, 42, 0.6)', borderRadius: '8px', fontSize: '0.85rem', color: '#9ca3af' }}>
-                <strong>Evaluation:</strong> {project.evaluation.reasoning}
-              </div>
-            )}
+    <div className="results-section">
+      <div className="results-header">
+        <span className="results-count">
+          <span className="accent">{projects.length}</span>
+          {' '}result{projects.length !== 1 ? 's' : ''}
+        </span>
+        <div className="results-controls">
+          <div className="sort-controls">
+            {SORT_OPTIONS.map(opt => (
+              <button
+                key={opt.value}
+                type="button"
+                className={`btn btn-sm ${sortBy === opt.value ? 'btn-active' : ''}`}
+                onClick={() => handleSortClick(opt.value)}
+              >
+                {opt.label}
+                {sortBy === opt.value ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''}
+              </button>
+            ))}
           </div>
+          <div className="export-controls">
+            <button type="button" className="btn btn-sm" onClick={handleExportJson}>
+              json
+            </button>
+            <button type="button" className="btn btn-sm" onClick={handleExportCsv}>
+              csv
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="results-list">
+        {sorted.map((project, i) => (
+          <ProjectCard key={project.url || i} project={project} />
         ))}
       </div>
     </div>
-  );
+  )
 }
-
