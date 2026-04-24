@@ -1,29 +1,94 @@
-from pydantic_settings import BaseSettings
+import os
+from typing import Optional, List
+from dotenv import load_dotenv
 
-VALID_CATEGORY_IDS = {41, 15, 11, 13, 12, 14, 17}
+# Try to load .env file, but don't fail if it doesn't exist
+try:
+    load_dotenv()
+except:
+    pass
 
-REQUEST_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/131.0.0.0 Safari/537.36"
-    ),
-    "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Referer": "https://kwork.ru/",
-}
+class Config:
+    # App settings
+    _mode = os.getenv('MODE', 'demo').lower().strip()  # Normalize to lowercase (full, FULL, Full -> full)
+    # Validate MODE value
+    if _mode not in ['demo', 'full']:
+        # If invalid, default to demo and log warning
+        import warnings
+        warnings.warn(f"Invalid MODE value: {os.getenv('MODE')}. Using 'demo' instead. Valid values: 'demo', 'full'")
+        _mode = 'demo'
+    MODE: str = _mode
+    LOG_LEVEL: str = os.getenv('LOG_LEVEL', 'INFO')
 
+    # Kwork settings
+    KWORK_BASE_URL: str = "https://kwork.ru"
+    KWORK_PROJECTS_URL: str = f"{KWORK_BASE_URL}/projects"
+    KWORK_FAVORITES_URL: str = f"{KWORK_PROJECTS_URL}?type=favourite"
+    KWORK_LOGIN_URL: str = f"{KWORK_BASE_URL}/login"
+    # Search keywords - can be comma-separated list or single keyword
+    SEARCH_KEYWORDS: str = os.getenv('SEARCH_KEYWORDS', 'бот, данные, скрипт, скрипты, сканер, парсер')
+    # Legacy support: if SEARCH_KEYWORD is set, use it
+    _legacy_keyword = os.getenv('SEARCH_KEYWORD')
+    if _legacy_keyword:
+        SEARCH_KEYWORDS = _legacy_keyword
+    # Parse keywords into list (split by comma, strip whitespace)
+    SEARCH_KEYWORDS_LIST: List[str] = [kw.strip() for kw in SEARCH_KEYWORDS.split(',') if kw.strip()]
+    # Primary keyword for logging (first one)
+    SEARCH_KEYWORD: str = SEARCH_KEYWORDS_LIST[0] if SEARCH_KEYWORDS_LIST else 'бот'
 
-class Settings(BaseSettings):
-    kwork_base_url: str = "https://kwork.ru"
-    kwork_rate_limit_rps: float = 1.0
-    request_timeout: int = 15
-    log_level: str = "INFO"
-    kwork_cookie: str = ""
+    # Credentials
+    KWORK_EMAIL: Optional[str] = os.getenv('KWORK_EMAIL')
+    KWORK_PASSWORD: Optional[str] = os.getenv('KWORK_PASSWORD')
 
-    class Config:
-        env_file = ".env"
+    # Telegram
+    TELEGRAM_BOT_TOKEN: Optional[str] = os.getenv('TELEGRAM_BOT_TOKEN')
+    TELEGRAM_CHANNEL_ID: Optional[str] = os.getenv('TELEGRAM_CHANNEL_ID')
+    
+    # n8n Integration
+    N8N_WEBHOOK_URL: Optional[str] = os.getenv('N8N_WEBHOOK_URL')
+    
+    # Gemini AI (for semantic evaluation)
+    GEMINI_API_KEY: Optional[str] = os.getenv('GEMINI_API_KEY')
+    SEMANTIC_SIMILARITY_THRESHOLD: float = float(os.getenv('SEMANTIC_SIMILARITY_THRESHOLD', '0.50'))  # Lowered from 0.75 to 0.50 for better matching
 
+    # Search limits
+    MAX_PROJECTS_PER_SESSION: int = int(os.getenv('MAX_PROJECTS_PER_SESSION', '5'))
+    EVALUATION_THRESHOLD: float = float(os.getenv('EVALUATION_THRESHOLD', '0.4'))
+    MAX_URGENCY_HOURS: int = int(os.getenv('MAX_URGENCY_HOURS', '24'))
 
-settings = Settings()
+    # Timing (seconds)
+    SESSION_DURATION_MAX: int = int(os.getenv('SESSION_DURATION_MAX', '300'))
+    PAUSE_BETWEEN_CHECKS: int = int(os.getenv('PAUSE_BETWEEN_CHECKS', '3600'))
+    READING_TIME_MIN: int = int(os.getenv('READING_TIME_MIN', '10'))
+    READING_TIME_MAX: int = int(os.getenv('READING_TIME_MAX', '30'))
+
+    # Gemini CP Prompt Template
+    GEMINI_CP_PROMPT: str = os.getenv('GEMINI_CP_PROMPT', """
+Вы — эксперт по продажам на фриланс-бирже Kwork. 
+Ваша задача: написать профессиональное коммерческое предложение (КП) для проекта.
+
+Описание проекта:
+{description}
+
+Бюджет клиента: {budget}
+
+Требования к КП:
+1. Тон: Профессиональный, уверенный, но дружелюбный.
+2. Структура: Приветствие, понимание задачи, краткое описание решения, почему выбрать именно нас, призыв к действию.
+3. Язык: Только русский.
+4. Длина: Около 100-150 слов.
+5. Не используйте шаблоны, пишите конкретно по задаче.
+
+Напишите только текст отклика.
+""")
+
+    # Budget filters (indices 0-4 as discovered by browser subagent)
+    # 0: up to 1k, 1: 1k-3k, 2: 3k-10k, 3: 10k-30k, 4: 30k+
+    BUDGET_FILTERS: List[int] = []
+
+    # Human behavior
+    DELAY_BETWEEN_ACTIONS_MIN: float = 2.0
+    DELAY_BETWEEN_ACTIONS_MAX: float = 8.0
+    MOUSE_MOVEMENT_STEPS: int = 10
+
+config = Config()
