@@ -1,0 +1,43 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: freelance-web
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PYTHON_API_URL=http://python-service:8000
+    depends_on:
+      python-service:
+        condition: service_healthy
+    networks:
+      - freelance-net
+    restart: unless-stopped
+
+  python-service:
+    build:
+      context: ./python
+      dockerfile: Dockerfile
+    container_name: freelance-python
+    expose:
+      - "8000"
+    environment:
+      - KWORK_BASE_URL=https://kwork.ru
+      - KWORK_RATE_LIMIT_RPS=1
+      - REQUEST_TIMEOUT=15
+      - LOG_LEVEL=INFO
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - freelance-net
+    restart: unless-stopped
+
+networks:
+  freelance-net:
+    driver: bridge

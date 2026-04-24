@@ -1,11 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
 import { useDebounce } from '../hooks/useDebounce'
 import { useLocalStorage } from '../hooks/useLocalStorage'
+import { KWORK_CATEGORIES } from '../../lib/kworkCategories'
+
+const DEFAULT_CATEGORY = 41
 
 const filterCyrillic = (text) => text.replace(/[^а-яА-ЯёЁ\s,.-]/g, '')
 
 export default function SearchTab({ onSearch, isLoading }) {
   const [query, setQuery] = useState('')
+  const [category, setCategory] = useState(DEFAULT_CATEGORY)
   const [timeLeft, setTimeLeft] = useState('')
   const [hiredMin, setHiredMin] = useState('')
   const [proposalsMax, setProposalsMax] = useState('')
@@ -20,9 +24,10 @@ export default function SearchTab({ onSearch, isLoading }) {
 
   const buildParams = (q) => ({
     keywords: q,
-    timeLeft: timeLeft ? parseInt(timeLeft) : null,
-    hiredMin: hiredMin ? parseInt(hiredMin) : null,
-    proposalsMax: proposalsMax ? parseInt(proposalsMax) : null,
+    ...(category !== DEFAULT_CATEGORY ? { category } : {}),
+    timeLeft: timeLeft ? parseInt(timeLeft, 10) : null,
+    hiredMin: hiredMin ? parseInt(hiredMin, 10) : null,
+    proposalsMax: proposalsMax ? parseInt(proposalsMax, 10) : null,
   })
 
   const pushHistory = (q) => {
@@ -31,7 +36,7 @@ export default function SearchTab({ onSearch, isLoading }) {
     setHistory(prev => [trimmed, ...prev.filter(h => h !== trimmed)].slice(0, 5))
   }
 
-  useEffect(() => { lastSearchedRef.current = '' }, [timeLeft, hiredMin, proposalsMax])
+  useEffect(() => { lastSearchedRef.current = '' }, [category, timeLeft, hiredMin, proposalsMax])
 
   useEffect(() => {
     if (debouncedQuery.length >= 3 && debouncedQuery !== lastSearchedRef.current) {
@@ -39,8 +44,7 @@ export default function SearchTab({ onSearch, isLoading }) {
       pushHistory(debouncedQuery)
       onSearchRef.current(buildParams(debouncedQuery))
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedQuery, timeLeft, hiredMin, proposalsMax])
+  }, [debouncedQuery, category, timeLeft, hiredMin, proposalsMax])
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -61,6 +65,24 @@ export default function SearchTab({ onSearch, isLoading }) {
 
   return (
     <form onSubmit={handleSubmit}>
+      <div className="form-group">
+        <label className="form-label">
+          category
+        </label>
+        <select
+          value={category}
+          onChange={(e) => setCategory(parseInt(e.target.value, 10))}
+          className="form-input"
+          disabled={isLoading}
+        >
+          {KWORK_CATEGORIES.map((cat) => (
+            <option key={cat.id} value={cat.id}>
+              {cat.labelRu}
+            </option>
+          ))}
+        </select>
+      </div>
+
       <div className="form-group">
         <label className="form-label">
           keywords <span className="form-hint">// кириллица</span>
