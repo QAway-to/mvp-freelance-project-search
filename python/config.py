@@ -87,8 +87,8 @@ class Config:
     BUDGET_FILTERS: List[int] = []
 
     # Human behavior
-    DELAY_BETWEEN_ACTIONS_MIN: float = 2.0
-    DELAY_BETWEEN_ACTIONS_MAX: float = 8.0
+    DELAY_BETWEEN_ACTIONS_MIN: float = 1.0
+    DELAY_BETWEEN_ACTIONS_MAX: float = 4.0
     MOUSE_MOVEMENT_STEPS: int = 10
 
 config = Config()

@@ -579,7 +579,19 @@ class AgentA:
                 break  # Reached page 1, done
 
         log_agent_action("Agent A", f"✅ [LISTING] Collection complete: {len(all_projects)} projects")
-        
+
+        # Deduplicate by URL (keep first occurrence — avoids nested .want-card duplicates)
+        seen_urls: set = set()
+        unique: list = []
+        for p in all_projects:
+            url = p.get("url", "")
+            if url not in seen_urls:
+                seen_urls.add(url)
+                unique.append(p)
+        if len(unique) < len(all_projects):
+            log_agent_action("Agent A", f"🔁 [LISTING] Removed {len(all_projects) - len(unique)} duplicates, {len(unique)} unique projects")
+        all_projects = unique
+
         # Now evaluate all projects and rank by semantic similarity
         if len(all_projects) > 0:
             log_agent_action("Agent A", f"🤖 [SEMANTIC] Evaluating {len(all_projects)} projects for semantic relevance...")
