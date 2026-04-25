@@ -9,8 +9,8 @@ const filterCyrillic = (text) => text.replace(/[^а-яА-ЯёЁ\s,.-]/g, '')
 export default function SearchTab({ onSearch, isLoading }) {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState(DEFAULT_CATEGORY)
-  const [timeLeft, setTimeLeft] = useState('')
-  const [budgetMin, setBudgetMin] = useState('')
+  const [timeLeft, setTimeLeft] = useState('72')
+  const [budgetMin, setBudgetMin] = useState('20000')
   const [hiredMin, setHiredMin] = useState('')
   const [proposalsMax, setProposalsMax] = useState('')
   const [error, setError] = useState(null)
@@ -37,11 +37,11 @@ export default function SearchTab({ onSearch, isLoading }) {
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!query.trim()) { setError('введите ключевые слова'); return }
     setError(null)
-    lastSearchedRef.current = query.trim()
-    pushHistory(query.trim())
-    onSearchRef.current(buildParams(query.trim()))
+    const q = query.trim()
+    lastSearchedRef.current = q
+    if (q) pushHistory(q)
+    onSearchRef.current(buildParams(q))
   }
 
   const handleChipClick = (chip) => {
@@ -162,7 +162,7 @@ export default function SearchTab({ onSearch, isLoading }) {
 
       <button
         type="submit"
-        disabled={isLoading || !query.trim()}
+        disabled={isLoading}
         className="btn btn-primary btn-block"
       >
         {isLoading ? '> searching...' : '> search'}
