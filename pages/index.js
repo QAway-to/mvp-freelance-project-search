@@ -2,6 +2,7 @@ import Head from 'next/head'
 import { useState } from 'react'
 import ProjectSearchForm from '../src/components/ProjectSearchForm'
 import ProjectResults from '../src/components/ProjectResults'
+import LogMonitor from '../src/components/LogMonitor'
 
 export default function Home() {
   const [projects, setProjects] = useState([])
@@ -90,6 +91,8 @@ export default function Home() {
             <div className="alert alert-error">// {error}</div>
           )}
         </div>
+
+        <LogMonitor isActive={isLoading} />
 
         <ProjectResults projects={projects} />
       </main>
