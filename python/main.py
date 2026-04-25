@@ -8,7 +8,7 @@ import json
 
 from config import config
 from agents.agent_a import AgentA
-from utils.logger import setup_logging, log_queue, log_agent_action
+from utils.logger import setup_logging, log_queue, log_buffer, log_agent_action
 
 setup_logging()
 
@@ -143,13 +143,33 @@ async def generate_cp(request: Request):
     return {"status": "success", "proposal": proposal}
 
 
+@app.get("/debug")
+async def debug_info():
+    """Returns last 300 log lines + current agent state for diagnostics."""
+    return {
+        "agent_status": agent_a.status,
+        "driver_ready": agent_a.driver is not None,
+        "logged_in": agent_a.logged_in,
+        "mode": config.MODE,
+        "kwork_email_set": bool(config.KWORK_EMAIL),
+        "kwork_password_set": bool(config.KWORK_PASSWORD),
+        "projects_in_memory": len(agent_a.found_projects),
+        "logs": list(log_buffer),
+    }
+
+
 # ── Next.js proxy endpoints ────────────────────────────────────────────────────
 
 @app.post("/api/search")
 async def api_search(request: Request):
     """Keyword search for Next.js UI proxy."""
+    import time
+    t0 = time.time()
+
     data = await request.json()
     keywords = (data.get("keywords") or "").strip()
+    log_agent_action("API", f"[SEARCH] request received: keywords={keywords!r} mode={config.MODE} driver={agent_a.driver is not None} logged_in={agent_a.logged_in}")
+
     if not keywords:
         raise HTTPException(status_code=400, detail="keywords required")
 
@@ -164,7 +184,12 @@ async def api_search(request: Request):
     config.MAX_URGENCY_HOURS = max_urgency
 
     try:
+        log_agent_action("API", f"[SEARCH] dispatching to thread, keywords={config.SEARCH_KEYWORDS_LIST}")
         projects = await asyncio.to_thread(agent_a.search_projects)
+        log_agent_action("API", f"[SEARCH] thread returned {len(projects)} projects in {time.time()-t0:.1f}s")
+    except Exception as exc:
+        log_agent_action("API", f"[SEARCH] thread raised exception: {exc}", level="ERROR")
+        raise
     finally:
         config.SEARCH_KEYWORDS_LIST = original_keywords
         config.SEARCH_KEYWORD = original_keyword
@@ -178,7 +203,8 @@ async def api_search(request: Request):
     if proposals_max is not None:
         projects = [p for p in projects if p.get("proposals", 0) <= proposals_max]
 
-    return {"success": True, "data": projects, "meta": {"total": len(projects), "took_ms": 0}, "error": None}
+    log_agent_action("API", f"[SEARCH] responding with {len(projects)} projects, total_time={time.time()-t0:.1f}s")
+    return {"success": True, "data": projects, "meta": {"total": len(projects), "took_ms": round((time.time()-t0)*1000)}, "error": None}
 
 
 @app.post("/api/parse")

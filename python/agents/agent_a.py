@@ -385,10 +385,24 @@ class AgentA:
         """Real search on Kwork with pagination, proposal button check, and semantic ranking"""
         log_agent_action("Agent A", "🌐 [SELENIUM] Real search mode: accessing Kwork")
 
+        log_agent_action("Agent A", f"[SEARCH] _search_real_projects start: driver={self.driver is not None} logged_in={self.logged_in}")
+
         if not self.driver:
-            self.setup_driver()
+            log_agent_action("Agent A", "[SEARCH] driver is None — calling setup_driver()")
+            try:
+                self.setup_driver()
+                log_agent_action("Agent A", f"[SEARCH] setup_driver done: driver={self.driver is not None}")
+            except Exception as e:
+                log_agent_action("Agent A", f"[SEARCH] setup_driver FAILED: {e}", level="ERROR")
+                return []
+
         if not self.logged_in:
-            self.login()
+            log_agent_action("Agent A", "[SEARCH] not logged in — calling login()")
+            try:
+                result = self.login()
+                log_agent_action("Agent A", f"[SEARCH] login returned: {result}, logged_in={self.logged_in}")
+            except Exception as e:
+                log_agent_action("Agent A", f"[SEARCH] login FAILED: {e}", level="ERROR")
 
         # Build search URL with all keywords (comma-separated, URL-encoded)
         # Format: ?keyword=бот,данные,скрипт&page=1&a=1
