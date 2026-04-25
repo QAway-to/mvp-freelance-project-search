@@ -385,6 +385,11 @@ class AgentA:
         """Real search on Kwork with pagination, proposal button check, and semantic ranking"""
         log_agent_action("Agent A", "🌐 [SELENIUM] Real search mode: accessing Kwork")
 
+        if not self.driver:
+            self.setup_driver()
+        if not self.logged_in:
+            self.login()
+
         # Build search URL with all keywords (comma-separated, URL-encoded)
         # Format: ?keyword=бот,данные,скрипт&page=1&a=1
         keywords_str = ','.join(config.SEARCH_KEYWORDS_LIST)
