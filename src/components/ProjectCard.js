@@ -49,7 +49,7 @@ export default function ProjectCard({ project }) {
 
       <div className="project-meta">
         {project.timeLeft != null && (
-          <span><span className="meta-key">time </span>{project.timeLeft}h</span>
+          <span><span className="meta-key">time </span>{Number(project.timeLeft).toFixed(2)}h</span>
         )}
         {project.budget && (
           <span><span className="meta-key">бюджет </span>{project.budget}</span>
