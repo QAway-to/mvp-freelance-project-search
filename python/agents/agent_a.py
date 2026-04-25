@@ -506,9 +506,7 @@ class AgentA:
                 except Exception as e:
                     continue
 
-            all_projects.extend(page_projects)
-
-            # Process each project from current page
+            # Process each project from current page — only append full-detail items
             for project_info in page_projects:
                 if len(all_projects) >= max_relevant_projects:
                     log_agent_action("Agent A", f"📊 [SELENIUM] Reached max relevant projects limit ({max_relevant_projects}), stopping collection")

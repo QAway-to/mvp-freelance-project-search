@@ -21,7 +21,9 @@ Search and parse projects from freelance platforms with advanced filtering optio
 
 ## Debug / Logs
 
-`GET /api/debug` — возвращает последние 300 строк логов Python-сервиса и текущее состояние агента.
+`GET /api/debug` → https://kwork-ui.onrender.com/api/debug
+
+Возвращает последние 300 строк логов Python-сервиса и текущее состояние агента.
 
 ```json
 {
