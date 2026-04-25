@@ -479,7 +479,8 @@ class AgentA:
                         "title": title,
                         "url": url,
                         "urgency": urgency_text,
-                        "urgency_hours": urgency_hours
+                        "urgency_hours": urgency_hours,
+                        "page": page
                     })
                     log_agent_action("Agent A", f"🔥 [HOT] Found urgent project: {title[:50]} ({urgency_text})")
 
@@ -487,14 +488,7 @@ class AgentA:
                     continue
 
             all_projects.extend(page_projects)
-            
-            # Since we are doing reverse pagination as requested by user starting from LAST page
-            # We should go backwards: page -= 1
-            if page > 1:
-                page -= 1
-            else:
-                break # Reached page 1
-            
+
             # Process each project from current page
             for project_info in page_projects:
                 if len(all_projects) >= max_relevant_projects:
@@ -745,13 +739,13 @@ class AgentA:
                     log_agent_action("Agent A", f"❌ [SELENIUM] Error processing project: {str(e)[:200]}")
                     continue
 
-            # Move to next page
-            page += 1
-            
-            # Small delay before next page
-            if page <= max_pages and len(all_projects) < max_relevant_projects:
+            # Reverse pagination: go backwards page by page
+            if page > 1:
+                page -= 1
                 delay = self.human_delay(1, 2)
                 log_agent_action("Agent A", f"⏱️ [SELENIUM] Delay before next page: {delay:.2f}s")
+            else:
+                break  # Reached page 1, done
 
         log_agent_action("Agent A", f"✅ [SELENIUM] Collection complete: Found {len(all_projects)} projects with proposal button available")
         

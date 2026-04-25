@@ -59,12 +59,6 @@ export default function ProjectCard({ project }) {
         )}
       </div>
 
-      {project.evaluation?.reasoning && (
-        <div className="project-reasoning">
-          <span className="meta-key">// </span>{project.evaluation.reasoning}
-        </div>
-      )}
-
       <div className="project-actions">
         {project.url && (
           <>
