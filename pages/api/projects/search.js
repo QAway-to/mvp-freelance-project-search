@@ -14,10 +14,6 @@ export default async function handler(req, res) {
 
   const { keywords, category, timeLeft, budgetMin, hiredMin, proposalsMax } = req.body
 
-  if (!keywords || !keywords.trim()) {
-    return res.status(400).json({ status: 'error', message: 'Keywords are required' })
-  }
-
   let result
   try {
     result = await searchProjects({ keywords, category, timeLeft, hiredMin, proposalsMax })

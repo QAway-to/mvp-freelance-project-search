@@ -404,12 +404,9 @@ class AgentA:
             except Exception as e:
                 log_agent_action("Agent A", f"[SEARCH] login FAILED: {e}", level="ERROR")
 
-        # Build search URL with all keywords (comma-separated, URL-encoded)
-        # Format: ?keyword=бот,данные,скрипт&page=1&a=1
         keywords_str = ','.join(config.SEARCH_KEYWORDS_LIST)
-        keywords_encoded = quote_plus(keywords_str)
-        
-        log_agent_action("Agent A", f"📋 [SELENIUM] Search keywords: {keywords_str}")
+        keywords_encoded = quote_plus(keywords_str) if keywords_str else ""
+        log_agent_action("Agent A", f"📋 [SELENIUM] Search keywords: {keywords_str or '(none — filter only)'}")
         log_agent_action("Agent A", f"📋 [SELENIUM] Target: Find up to 10 relevant projects with proposal button available, output top 5")
 
         # Search parameters
@@ -426,7 +423,10 @@ class AgentA:
             # Build search URL for current page
             # Inject budget filters if they exist
             budget_params = "&".join([f"prices-filters[]={f}" for f in config.BUDGET_FILTERS])
-            search_url = f"{config.KWORK_PROJECTS_URL}?keyword={keywords_encoded}&page={page}&a=1"
+            if keywords_encoded:
+                search_url = f"{config.KWORK_PROJECTS_URL}?keyword={keywords_encoded}&page={page}&a=1"
+            else:
+                search_url = f"{config.KWORK_PROJECTS_URL}?page={page}&a=1"
             if budget_params:
                 search_url += f"&{budget_params}"
                 
@@ -635,7 +635,23 @@ class AgentA:
             log_agent_action("Agent A", f"⚠️ [SELENIUM] No projects found with proposal button available")
             return []
 
-    def evaluate_and_notify(self, projects: List[Dict[str, Any]]):
+    async def notify_suitable_projects(self, projects: List[Dict[str, Any]]) -> int:
+        """Send Telegram notifications for suitable projects. Returns count sent."""
+        if not self.telegram:
+            return 0
+        suitable = [p for p in projects if p.get("evaluation", {}).get("suitable", False)]
+        if not suitable:
+            return 0
+        results = await asyncio.gather(
+            *(self.telegram.send_project_notification(p) for p in suitable),
+            return_exceptions=True,
+        )
+        for p, r in zip(suitable, results):
+            if isinstance(r, Exception):
+                log_agent_action("Agent A", f"📱 [TELEGRAM] Failed to notify '{p.get('title','?')[:40]}': {r}")
+        return sum(1 for r in results if not isinstance(r, Exception))
+
+    async def evaluate_and_notify(self, projects: List[Dict[str, Any]]):
         """Evaluate projects and send notifications - projects are already evaluated in _search_real_projects"""
         log_agent_action("Agent A", f"📊 [EVALUATION] Processing {len(projects)} pre-evaluated projects...")
         log_agent_action("Agent A", f"📊 [EVALUATION] Threshold: {config.EVALUATION_THRESHOLD}")
@@ -657,11 +673,6 @@ class AgentA:
                     log_agent_action("Agent A", f"✅ [EVALUATION] Project APPROVED: {project['title'][:50]}... (score: {score:.2f})")
                     log_agent_action("Agent A", f"📋 [EVALUATION] Reasons: {', '.join(reasons[:3])}")
 
-                    # Send to Telegram if configured
-                    if self.telegram:
-                        log_agent_action("Agent A", f"📱 [TELEGRAM] Sending notification for project {i+1}...")
-                        asyncio.create_task(self.telegram.send_project_notification(project))
-                    
                     # Send to n8n workflow (Agent B)
                     log_agent_action("Agent A", f"🔗 [N8N] Sending project {i+1} to n8n workflow...")
                     asyncio.create_task(self.send_to_n8n(project))
@@ -672,6 +683,10 @@ class AgentA:
                 log_agent_action("Agent A", f"❌ [EVALUATION] Error processing project {i+1}: {str(e)}")
 
         self.found_projects.extend(suitable_projects)
+
+        if suitable_projects:
+            notified = await self.notify_suitable_projects(suitable_projects)
+            log_agent_action("Agent A", f"📱 [TELEGRAM] Notified {notified}/{len(suitable_projects)} suitable projects")
 
         # Summary
         log_agent_action("Agent A", f"📈 [EVALUATION] Evaluation complete: {len(suitable_projects)}/{len(projects)} projects approved")
@@ -740,7 +755,7 @@ class AgentA:
                 # Step 2: Send notifications for suitable projects
                 step_start = datetime.now()
                 log_agent_action("Agent A", f"📊 [SESSION] Step 2/2: Sending notifications for {len(projects)} projects...")
-                self.evaluate_and_notify(projects)
+                await self.evaluate_and_notify(projects)
                 step_duration = (datetime.now() - step_start).total_seconds()
                 log_agent_action("Agent A", f"✅ [SESSION] Step 2/2 completed: Notifications sent in {step_duration:.2f}s")
             else:

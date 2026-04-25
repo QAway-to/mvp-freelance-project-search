@@ -162,23 +162,25 @@ async def api_search(request: Request):
     keywords = (data.get("keywords") or "").strip()
     log_agent_action("API", f"[SEARCH] request received: keywords={keywords!r} mode={config.MODE} driver={agent_a.driver is not None} logged_in={agent_a.logged_in}")
 
-    if not keywords:
-        raise HTTPException(status_code=400, detail="keywords required")
-
     max_urgency = int(data["timeLeft"]) if data.get("timeLeft") else config.MAX_URGENCY_HOURS
 
     original_keywords = list(config.SEARCH_KEYWORDS_LIST)
     original_keyword = config.SEARCH_KEYWORD
     original_urgency = config.MAX_URGENCY_HOURS
 
-    config.SEARCH_KEYWORDS_LIST = [kw.strip() for kw in keywords.split(",") if kw.strip()] or [keywords]
-    config.SEARCH_KEYWORD = config.SEARCH_KEYWORDS_LIST[0]
+    if keywords:
+        config.SEARCH_KEYWORDS_LIST = [kw.strip() for kw in keywords.split(",") if kw.strip()]
+        config.SEARCH_KEYWORD = config.SEARCH_KEYWORDS_LIST[0]
+    else:
+        config.SEARCH_KEYWORDS_LIST = []
+        config.SEARCH_KEYWORD = ""
     config.MAX_URGENCY_HOURS = max_urgency
 
     try:
         log_agent_action("API", f"[SEARCH] dispatching to thread, keywords={config.SEARCH_KEYWORDS_LIST}")
         projects = await asyncio.to_thread(agent_a.search_projects)
         log_agent_action("API", f"[SEARCH] thread returned {len(projects)} projects in {time.time()-t0:.1f}s")
+        asyncio.create_task(agent_a.notify_suitable_projects(projects))
     except Exception as exc:
         log_agent_action("API", f"[SEARCH] thread raised exception: {exc}", level="ERROR")
         raise
