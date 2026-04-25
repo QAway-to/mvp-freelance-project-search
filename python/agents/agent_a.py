@@ -473,43 +473,83 @@ class AgentA:
                 log_agent_action("Agent A", f"⚠️ [SELENIUM] No projects on page {page}, stopping search")
                 break
 
-            # Collect projects
+            # Collect all data from listing cards — no detail page navigation needed
             page_projects = []
+            proposals_re = re.compile(
+                r'(?:(\d+)\s*(?:предложен\w*|отклик\w*|заяв\w*|ставо?к?|оффер\w*)'
+                r'|(?:предложен\w*|отклик\w*|заяв\w*)\s*[:\-]?\s*(\d+))',
+                re.IGNORECASE
+            )
+            budget_re = re.compile(r'(от\s+[\d\s]+|до\s+[\d\s]+|[\d\s]{3,})\s*₽', re.IGNORECASE)
+
             for card in project_cards:
                 try:
                     # Urgency check
                     urgency_element = card.find_element(By.CSS_SELECTOR, ".want-card__informers-row span.mr8")
                     urgency_text = urgency_element.text.strip()
                     urgency_hours = self.parse_urgency(urgency_text)
-                    
+
                     if urgency_hours > config.MAX_URGENCY_HOURS:
-                        log_agent_action("Agent A", f"⏳ [FILTER] Skipping: {urgency_text} (> {config.MAX_URGENCY_HOURS}h)", level="DEBUG")
                         continue
 
                     # Title and link
                     link_element = card.find_element(By.CSS_SELECTOR, "h1 a[href*='/projects/']")
                     title = link_element.text.strip()
                     url = link_element.get_attribute("href")
-
-                    # Ensure URL has /view suffix
                     if url and '/projects/' in url:
                         if '?' in url: url = url.split('?')[0]
                         if not url.endswith('/view'): url = url.rstrip('/') + '/view'
 
-                    # Try to get proposals count from listing card
-                    proposals_from_card = None
-                    try:
-                        card_text = card.text
-                        card_proposals_re = re.compile(
-                            r'(?:(\d+)\s*(?:предложен\w*|отклик\w*|заяв\w*|ставо?к?|оффер\w*)'
-                            r'|(?:предложен\w*|отклик\w*|заяв\w*)\s*[:\-]?\s*(\d+))',
-                            re.IGNORECASE
-                        )
-                        m = card_proposals_re.search(card_text)
-                        if m:
-                            proposals_from_card = int(m.group(1) or m.group(2))
-                    except Exception:
-                        pass
+                    card_text = card.text
+
+                    # Budget from card element, then regex fallback
+                    budget = None
+                    for sel in [".wants-card__header-price", "[class*='price']", "[class*='budget']"]:
+                        try:
+                            el = card.find_element(By.CSS_SELECTOR, sel)
+                            t = el.text.strip()
+                            if t and (re.search(r'\d', t) or '₽' in t):
+                                budget = t
+                                break
+                        except Exception:
+                            pass
+                    if not budget:
+                        bm = budget_re.search(card_text)
+                        if bm:
+                            budget = bm.group(0).strip()
+
+                    # Description snippet from card
+                    description = ""
+                    for sel in [".wants-card__description-text", "[class*='description']"]:
+                        try:
+                            el = card.find_element(By.CSS_SELECTOR, sel)
+                            t = el.text.strip()
+                            if t and len(t) > 20:
+                                description = t
+                                break
+                        except Exception:
+                            pass
+
+                    # Proposals: try card sub-elements first, then regex on card text
+                    proposals = None
+                    for sel in ["[class*='count']", "[class*='responses']", "[class*='offers']", "[class*='informer']"]:
+                        try:
+                            for el in card.find_elements(By.CSS_SELECTOR, sel):
+                                t = el.text.strip()
+                                m = re.search(r'\d+', t)
+                                if m:
+                                    proposals = int(m.group(0))
+                                    break
+                            if proposals is not None:
+                                break
+                        except Exception:
+                            pass
+                    if proposals is None:
+                        pm = proposals_re.search(card_text)
+                        if pm:
+                            proposals = int(pm.group(1) if pm.group(1) is not None else pm.group(2))
+
+                    log_agent_action("Agent A", f"📋 [LISTING] {title[:45]} | budget={budget} | proposals={proposals}")
 
                     page_projects.append({
                         "id": url.split('/')[-2] if '/' in url else "unknown",
@@ -517,276 +557,28 @@ class AgentA:
                         "url": url,
                         "urgency": urgency_text,
                         "urgency_hours": urgency_hours,
+                        "budget": budget,
+                        "description": description,
+                        "proposals": proposals,
                         "page": page,
-                        "proposals": proposals_from_card
+                        "found_at": datetime.now().isoformat(),
                     })
-                    log_agent_action("Agent A", f"🔥 [HOT] Found urgent project: {title[:50]} ({urgency_text})")
 
-                except Exception as e:
+                except Exception:
                     continue
 
-            # Process each project from current page — only append full-detail items
-            for project_info in page_projects:
-                if len(all_projects) >= max_relevant_projects:
-                    log_agent_action("Agent A", f"📊 [SELENIUM] Reached max relevant projects limit ({max_relevant_projects}), stopping collection")
-                    break
-                    
-                try:
-                    project_id = project_info["id"]
-                    title = project_info["title"]
-                    url = project_info["url"]
-                    page_num = project_info["page"]
-                    
-                    log_agent_action("Agent A", f"🔍 [SELENIUM] Processing project from page {page_num}: {title[:50]}...")
-                    log_agent_action("Agent A", f"🔗 [SELENIUM] URL: {url}")
-
-                    # Navigate to project page
-                    log_agent_action("Agent A", f"🌐 [SELENIUM] Navigating to project page...")
-                    try:
-                        self.driver.get(url)
-                        log_agent_action("Agent A", f"✅ [SELENIUM] Project page loaded")
-                        
-                        # Wait for page to load
-                        delay = self.human_delay(2, 4)
-                        log_agent_action("Agent A", f"⏱️ [SELENIUM] Waiting for page stabilization: {delay:.2f}s")
-                    except Exception as e:
-                        log_agent_action("Agent A", f"❌ [SELENIUM] Error navigating to project page: {str(e)[:200]}")
-                        continue
-                    
-                    # CHECK: Is "Предложить услугу" button available?
-                    try:
-                        if not self._check_proposal_button_available():
-                            log_agent_action("Agent A", f"⏭️ [SELENIUM] Skipping project (proposal button not available - proposal may already be sent)")
-                            continue  # Skip this project - proposal already sent
-                    except Exception as e:
-                        log_agent_action("Agent A", f"⚠️ [SELENIUM] Error checking proposal button: {str(e)[:100]}")
-                        # Assume button is available if we can't check
-                    
-                    log_agent_action("Agent A", f"✅ [SELENIUM] Proposal button available - project is eligible")
-                    
-                    try:
-                        
-                        # Get FULL description from project page
-                        description = ""
-                        log_agent_action("Agent A", f"📝 [SELENIUM] Extracting FULL description from project page...")
-                        try:
-                            # Try multiple selectors for full description
-                            desc_selectors = [
-                                ".wants-card__description-text",
-                                ".task__description",
-                                "[class*='description-text']",
-                                "[class*='wants-card__text']",
-                                ".project-description",
-                                "[data-test-id='task-description']",
-                                ".break-word"
-                            ]
-                            
-                            for selector in desc_selectors:
-                                try:
-                                    desc_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                                    if desc_elements:
-                                        desc_texts = [elem.text.strip() for elem in desc_elements if elem.text.strip()]
-                                        if desc_texts:
-                                            description = '\n'.join(desc_texts)
-                                            if len(description) > 100:
-                                                break
-                                except Exception:
-                                    continue
-                            
-                            # Fallback: get all text from main content area
-                            if not description or len(description) < 100:
-                                try:
-                                    main_content = self.driver.find_element(By.CSS_SELECTOR, "main, .content, .container, [class*='wants-card']")
-                                    description = main_content.text.strip()
-                                    if title in description:
-                                        desc_start = description.find(title) + len(title)
-                                        description = description[desc_start:].strip()
-                                except Exception:
-                                    pass
-                            
-                            log_agent_action("Agent A", f"✅ [SELENIUM] Full description extracted: {len(description)} chars")
-                        except Exception as e:
-                            log_agent_action("Agent A", f"⚠️ [SELENIUM] Error extracting full description: {str(e)}")
-
-                        # Get budget from project page
-                        budget = ""
-                        log_agent_action("Agent A", f"💰 [SELENIUM] Extracting budget from project page...")
-                        try:
-                            budget_selectors = [
-                                ".wants-card__header-price",
-                                "[class*='price-text']",
-                                "[class*='budget']",
-                                "[class*='price']",
-                                "[data-test-id='task-price']",
-                                ".task__price",
-                                ".project-price",
-                            ]
-                            for selector in budget_selectors:
-                                try:
-                                    budget_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                                    for elem in budget_elements:
-                                        budget_text = elem.text.strip()
-                                        if budget_text and (re.search(r'\d', budget_text) or '₽' in budget_text or 'руб' in budget_text.lower()):
-                                            budget = budget_text
-                                            break
-                                    if budget:
-                                        break
-                                except Exception:
-                                    continue
-                            
-                            # If not found via selectors, try regex in page source
-                            if not budget:
-                                try:
-                                    page_source = self.driver.page_source
-                                    price_patterns = [
-                                        r'(\d{1,3}(?:\s?\d{3})*)\s*[₽руб]',
-                                        r'[₽руб]\s*(\d{1,3}(?:\s?\d{3})*)',
-                                        r'цена[:\s]*(\d{1,3}(?:\s?\d{3})*)',
-                                        r'бюджет[:\s]*(\d{1,3}(?:\s?\d{3})*)'
-                                    ]
-                                    for pattern in price_patterns:
-                                        matches = re.findall(pattern, page_source, re.IGNORECASE)
-                                        if matches:
-                                            price_num = matches[0].replace(' ', '')
-                                            budget = f"{price_num} ₽"
-                                            break
-                                except Exception as e:
-                                    log_agent_action("Agent A", f"⚠️ [SELENIUM] Error in regex budget search: {str(e)[:100]}")
-                            
-                            if budget:
-                                log_agent_action("Agent A", f"✅ [SELENIUM] Budget: {budget}")
-                            else:
-                                log_agent_action("Agent A", f"⚠️ [SELENIUM] Budget not found on project page")
-                        except Exception as e:
-                            log_agent_action("Agent A", f"⚠️ [SELENIUM] Error extracting budget: {str(e)[:100]}")
-
-                        # Get proposals count from project page
-                        proposals = None
-                        log_agent_action("Agent A", f"📊 [SELENIUM] Extracting proposals count from project page...")
-                        try:
-                            page_text = self.driver.page_source
-                            proposals_re = re.compile(
-                                r'(?:(\d+)\s*(?:предложен\w*|отклик\w*|заяв\w*|ставо?к?|оффер\w*)'
-                                r'|(?:предложен\w*|отклик\w*|заяв\w*)\s*[:\-]?\s*(\d+))',
-                                re.IGNORECASE
-                            )
-                            m = proposals_re.search(page_text)
-                            if m:
-                                proposals = int(m.group(1) or m.group(2))
-
-                            # Try CSS selectors
-                            if proposals is None:
-                                try:
-                                    proposals_selectors = [
-                                        "[class*='responses']",
-                                        "[class*='proposals']",
-                                        "[class*='offers']",
-                                        "[class*='informer']",
-                                        "[data-test-id='task-responses']"
-                                    ]
-                                    for selector in proposals_selectors:
-                                        try:
-                                            prop_element = self.driver.find_element(By.CSS_SELECTOR, selector)
-                                            prop_text = prop_element.text
-                                            match = re.search(r'(\d+)', prop_text)
-                                            if match:
-                                                proposals = int(match.group(1))
-                                                break
-                                        except Exception:
-                                            continue
-                                except Exception:
-                                    pass
-
-                            # Fall back to listing-card value if detail page didn't yield a count
-                            if proposals is None and project_info.get("proposals") is not None:
-                                proposals = project_info["proposals"]
-
-                            log_agent_action("Agent A", f"✅ [SELENIUM] Proposals: {proposals}")
-                        except Exception as e:
-                            log_agent_action("Agent A", f"⚠️ [SELENIUM] Error extracting proposals: {str(e)}")
-
-                        # Get hired count from project page
-                        hired = 0
-                        log_agent_action("Agent A", f"👥 [SELENIUM] Extracting hired count from project page...")
-                        try:
-                            page_text = self.driver.page_source
-                            hired_patterns = [
-                                r'(\d+)\s+исполнител',
-                                r'нанят[:\s]+(\d+)',
-                                r'исполнитель.*нанят',
-                                r'нанято[:\s]+(\d+)'
-                            ]
-                            for pattern in hired_patterns:
-                                match = re.search(pattern, page_text, re.IGNORECASE)
-                                if match:
-                                    if match.lastindex:
-                                        hired = int(match.group(1))
-                                    else:
-                                        hired = 1
-                                    break
-                            
-                            # Check for hired badge/indicator
-                            if hired == 0:
-                                try:
-                                    hired_indicators = [
-                                        "[class*='executor']",
-                                        "[class*='hired']",
-                                        "[data-test-id='task-executor']"
-                                    ]
-                                    for selector in hired_indicators:
-                                        try:
-                                            hired_element = self.driver.find_element(By.CSS_SELECTOR, selector)
-                                            if hired_element:
-                                                hired = 1
-                                                break
-                                        except Exception:
-                                            continue
-                                except Exception:
-                                    pass
-                            
-                            log_agent_action("Agent A", f"✅ [SELENIUM] Hired: {hired}")
-                        except Exception as e:
-                            log_agent_action("Agent A", f"⚠️ [SELENIUM] Error extracting hired: {str(e)}")
-
-                        # Create project data
-                        project_data = {
-                            "id": project_id,
-                            "title": title,
-                            "description": description,
-                            "budget": budget,
-                            "url": url,
-                            "proposals": proposals,
-                            "hired": hired,
-                            "found_at": datetime.now().isoformat(),
-                            "page": page_num
-                        }
-
-                        all_projects.append(project_data)
-                        log_agent_action("Agent A", f"✅ [SELENIUM] Project added to collection ({len(all_projects)}/{max_relevant_projects}): {title[:50]}...")
-
-                        # Human delay between projects
-                        delay = self.human_delay(1, 3)
-                        log_agent_action("Agent A", f"⏱️ [SELENIUM] Processing delay: {delay:.2f}s")
-                        
-                    except Exception as e:
-                        log_agent_action("Agent A", f"❌ [SELENIUM] Error extracting project data: {str(e)[:200]}")
-                        continue
-                        
-                except Exception as e:
-                    log_agent_action("Agent A", f"❌ [SELENIUM] Error processing project: {str(e)[:200]}")
-                    continue
+            all_projects.extend(page_projects[:max_relevant_projects - len(all_projects)])
 
             scraped_listing_pages += 1
+            log_agent_action("Agent A", f"📄 [LISTING] Page scraped: {len(page_projects)} cards, total collected: {len(all_projects)}")
 
             # Reverse pagination: go backwards page by page
             if page > 1:
                 page -= 1
-                delay = self.human_delay(1, 2)
-                log_agent_action("Agent A", f"⏱️ [SELENIUM] Delay before next page: {delay:.2f}s")
             else:
                 break  # Reached page 1, done
 
-        log_agent_action("Agent A", f"✅ [SELENIUM] Collection complete: Found {len(all_projects)} projects with proposal button available")
+        log_agent_action("Agent A", f"✅ [LISTING] Collection complete: {len(all_projects)} projects")
         
         # Now evaluate all projects and rank by semantic similarity
         if len(all_projects) > 0:
