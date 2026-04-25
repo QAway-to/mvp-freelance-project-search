@@ -1,6 +1,7 @@
 import logging
 import asyncio
 import json
+from collections import deque
 from datetime import datetime
 from typing import Dict, Any
 from rich.console import Console
@@ -9,8 +10,11 @@ from rich.logging import RichHandler
 # Global log queue for real-time streaming - increased size for detailed logging
 log_queue = asyncio.Queue(maxsize=5000)
 
+# In-memory buffer for debug endpoint — keeps last 300 messages
+log_buffer: deque = deque(maxlen=300)
+
 class QueueHandler(logging.Handler):
-    """Custom handler to send logs to queue"""
+    """Custom handler to send logs to queue and buffer"""
 
     def emit(self, record):
         try:
@@ -21,13 +25,13 @@ class QueueHandler(logging.Handler):
                 "module": record.module,
                 "function": record.funcName
             }
+            serialized = json.dumps(log_entry)
 
-            # Simple, non-blocking queue insertion
-            # If queue is full, remove oldest messages
+            log_buffer.append(log_entry)
+
             try:
-                log_queue.put_nowait(json.dumps(log_entry))
+                log_queue.put_nowait(serialized)
             except asyncio.QueueFull:
-                # Remove old messages to make room (keep queue size manageable)
                 removed = 0
                 while removed < 50 and not log_queue.empty():
                     try:
@@ -35,14 +39,13 @@ class QueueHandler(logging.Handler):
                         removed += 1
                     except:
                         break
-                # Try to add new message
                 try:
-                    log_queue.put_nowait(json.dumps(log_entry))
+                    log_queue.put_nowait(serialized)
                 except:
-                    pass  # If still full, skip this message
+                    pass
 
         except Exception:
-            pass  # Don't let logging errors crash the app
+            pass
 
 def setup_logging():
     """Setup logging with Rich console and queue handler"""
