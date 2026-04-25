@@ -451,14 +451,9 @@ a {
 
 .log-progress-fill {
   height: 100%;
-  width: 40%;
+  width: 0%;
   background: var(--accent);
-  animation: log-slide 1.4s ease-in-out infinite;
-}
-
-@keyframes log-slide {
-  0%   { transform: translateX(-100%); }
-  100% { transform: translateX(350%); }
+  transition: width 0.6s ease;
 }
 
 .log-status-msg {
