@@ -1,4 +1,5 @@
 import asyncio
+import queue
 import os
 import uvicorn
 from fastapi import FastAPI, Request, HTTPException
@@ -36,30 +37,21 @@ async def stream_logs():
         while True:
             try:
                 batch = []
-                while len(batch) < 200:
+                while len(batch) < 20:
                     try:
-                        log_message = log_queue.get_nowait()
-                        batch.append(log_message)
-                    except asyncio.QueueEmpty:
+                        msg = log_queue.get_nowait()
+                        batch.append(msg)
+                    except queue.Empty:
                         break
-
-                for log_message in batch:
-                    yield f"data: {log_message}\n\n"
-                    if len(batch) > 1:
-                        await asyncio.sleep(0.0001)
-
                 if batch:
+                    for msg in batch:
+                        yield f"data: {msg}\n\n"
+                    await asyncio.sleep(0)
                     continue
-
-                try:
-                    log_message = await asyncio.wait_for(log_queue.get(), timeout=0.01)
-                    yield f"data: {log_message}\n\n"
-                except asyncio.TimeoutError:
-                    yield f": keepalive\n\n"
-                    await asyncio.sleep(0.05)
-
-            except Exception as e:
-                yield f"data: {{\"error\": \"{str(e)}\"}}\n\n"
+                yield ": keepalive\n\n"
+                await asyncio.sleep(0.05)
+            except Exception:
+                yield 'data: {"error": "stream_error"}\n\n'
                 await asyncio.sleep(0.1)
 
     return StreamingResponse(
@@ -201,7 +193,7 @@ async def api_search(request: Request):
     if hired_min is not None:
         projects = [p for p in projects if p.get("hired", 0) >= hired_min]
     if proposals_max is not None:
-        projects = [p for p in projects if p.get("proposals", 0) <= proposals_max]
+        projects = [p for p in projects if (p.get("proposals") or 0) <= proposals_max]
 
     log_agent_action("API", f"[SEARCH] responding with {len(projects)} projects, total_time={time.time()-t0:.1f}s")
     return {"success": True, "data": projects, "meta": {"total": len(projects), "took_ms": round((time.time()-t0)*1000)}, "error": None}

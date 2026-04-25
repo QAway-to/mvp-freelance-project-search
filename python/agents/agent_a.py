@@ -419,8 +419,10 @@ class AgentA:
         
         all_projects = []  # All projects found (with full details)
         page = 1
-        
-        while page <= max_pages and len(all_projects) < max_relevant_projects:
+        scraped_listing_pages = 0
+        reverse_page_set = False  # guard: reverse-pagination redirect fires only once
+
+        while scraped_listing_pages < max_pages and len(all_projects) < max_relevant_projects:
             # Build search URL for current page
             # Inject budget filters if they exist
             budget_params = "&".join([f"prices-filters[]={f}" for f in config.BUDGET_FILTERS])
@@ -434,8 +436,8 @@ class AgentA:
                 self.driver.get(search_url)
                 log_agent_action("Agent A", f"✅ [SELENIUM] Page {page} loaded successfully")
                 
-                # Logic for reverse pagination (on first page load)
-                if page == 1:
+                # Logic for reverse pagination (on first page load, only once)
+                if page == 1 and not reverse_page_set:
                     try:
                         pagination_items = self.driver.find_elements(By.CSS_SELECTOR, ".pagination__item")
                         if pagination_items:
@@ -450,6 +452,7 @@ class AgentA:
                                 log_agent_action("Agent A", f"📑 [SELENIUM] Found {max_p} total pages. Switching to last page for reverse search.")
                                 # Redirect to last page instead of continuing from p1
                                 page = max_p
+                                reverse_page_set = True
                                 self.driver.get(f"{search_url.replace('page=1', f'page={max_p}')}")
                                 log_agent_action("Agent A", f"🔄 [SELENIUM] Switched to last page {max_p}")
                     except Exception as pg_e:
@@ -487,11 +490,26 @@ class AgentA:
                     link_element = card.find_element(By.CSS_SELECTOR, "h1 a[href*='/projects/']")
                     title = link_element.text.strip()
                     url = link_element.get_attribute("href")
-                    
+
                     # Ensure URL has /view suffix
                     if url and '/projects/' in url:
                         if '?' in url: url = url.split('?')[0]
                         if not url.endswith('/view'): url = url.rstrip('/') + '/view'
+
+                    # Try to get proposals count from listing card
+                    proposals_from_card = None
+                    try:
+                        card_text = card.text
+                        card_proposals_re = re.compile(
+                            r'(?:(\d+)\s*(?:предложен\w*|отклик\w*|заяв\w*|ставо?к?|оффер\w*)'
+                            r'|(?:предложен\w*|отклик\w*|заяв\w*)\s*[:\-]?\s*(\d+))',
+                            re.IGNORECASE
+                        )
+                        m = card_proposals_re.search(card_text)
+                        if m:
+                            proposals_from_card = int(m.group(1) or m.group(2))
+                    except Exception:
+                        pass
 
                     page_projects.append({
                         "id": url.split('/')[-2] if '/' in url else "unknown",
@@ -499,7 +517,8 @@ class AgentA:
                         "url": url,
                         "urgency": urgency_text,
                         "urgency_hours": urgency_hours,
-                        "page": page
+                        "page": page,
+                        "proposals": proposals_from_card
                     })
                     log_agent_action("Agent A", f"🔥 [HOT] Found urgent project: {title[:50]} ({urgency_text})")
 
@@ -642,30 +661,27 @@ class AgentA:
                             log_agent_action("Agent A", f"⚠️ [SELENIUM] Error extracting budget: {str(e)[:100]}")
 
                         # Get proposals count from project page
-                        proposals = 0
+                        proposals = None
                         log_agent_action("Agent A", f"📊 [SELENIUM] Extracting proposals count from project page...")
                         try:
                             page_text = self.driver.page_source
-                            proposals_patterns = [
-                                r'(\d+)\s+предложен',
-                                r'(\d+)\s+предложений',
-                                r'(\d+)\s+отклик',
-                                r'(\d+)\s+откликов',
-                                r'откликов[:\s]+(\d+)',
-                                r'предложений[:\s]+(\d+)'
-                            ]
-                            for pattern in proposals_patterns:
-                                match = re.search(pattern, page_text, re.IGNORECASE)
-                                if match:
-                                    proposals = int(match.group(1))
-                                    break
-                            
+                            proposals_re = re.compile(
+                                r'(?:(\d+)\s*(?:предложен\w*|отклик\w*|заяв\w*|ставо?к?|оффер\w*)'
+                                r'|(?:предложен\w*|отклик\w*|заяв\w*)\s*[:\-]?\s*(\d+))',
+                                re.IGNORECASE
+                            )
+                            m = proposals_re.search(page_text)
+                            if m:
+                                proposals = int(m.group(1) or m.group(2))
+
                             # Try CSS selectors
-                            if proposals == 0:
+                            if proposals is None:
                                 try:
                                     proposals_selectors = [
                                         "[class*='responses']",
                                         "[class*='proposals']",
+                                        "[class*='offers']",
+                                        "[class*='informer']",
                                         "[data-test-id='task-responses']"
                                     ]
                                     for selector in proposals_selectors:
@@ -680,7 +696,11 @@ class AgentA:
                                             continue
                                 except Exception:
                                     pass
-                            
+
+                            # Fall back to listing-card value if detail page didn't yield a count
+                            if proposals is None and project_info.get("proposals") is not None:
+                                proposals = project_info["proposals"]
+
                             log_agent_action("Agent A", f"✅ [SELENIUM] Proposals: {proposals}")
                         except Exception as e:
                             log_agent_action("Agent A", f"⚠️ [SELENIUM] Error extracting proposals: {str(e)}")
@@ -755,6 +775,8 @@ class AgentA:
                 except Exception as e:
                     log_agent_action("Agent A", f"❌ [SELENIUM] Error processing project: {str(e)[:200]}")
                     continue
+
+            scraped_listing_pages += 1
 
             # Reverse pagination: go backwards page by page
             if page > 1:
