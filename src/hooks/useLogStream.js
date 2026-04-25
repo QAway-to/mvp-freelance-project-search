@@ -37,17 +37,31 @@ function computeProgress(message) {
   return null
 }
 
+// Fallback timeline when SSE messages don't arrive in real-time
+const PROGRESS_TIMELINE = [
+  [1500,  5,  '// браузер запускается...'],
+  [4000,  15, '// авторизация...'],
+  [9000,  25, '// загрузка страницы...'],
+  [14000, 35, '// поиск проектов...'],
+  [20000, 50, '// обработка карточек...'],
+  [35000, 70, '// семантическая оценка...'],
+  [55000, 85, '// финализация...'],
+  [85000, 95, '// почти готово...'],
+]
+
 export function useLogStream(active) {
   const [lines, setLines] = useState([])
   const [progress, setProgress] = useState(0)
   const [lastMsg, setLastMsg] = useState('')
   const esRef = useRef(null)
+  const realProgressRef = useRef(0)
 
   useEffect(() => {
     if (!active) return
     setLines([])
     setProgress(0)
     setLastMsg('')
+    realProgressRef.current = 0
 
     const es = new EventSource('/api/logs/stream')
     esRef.current = es
@@ -64,7 +78,10 @@ export function useLogStream(active) {
         setLastMsg(entry.message)
 
         const p = computeProgress(entry.message)
-        if (p !== null) setProgress(p)
+        if (p !== null) {
+          realProgressRef.current = p
+          setProgress(p)
+        }
       } catch {
         // keepalive — skip
       }
@@ -75,15 +92,26 @@ export function useLogStream(active) {
       es.close()
     }
 
+    // Fallback timers: advance progress/message when SSE is silent
+    const timers = PROGRESS_TIMELINE.map(([delay, p, msg]) =>
+      setTimeout(() => {
+        if (realProgressRef.current < p) {
+          setProgress(p)
+          setLastMsg(prev => prev || msg)
+        }
+      }, delay)
+    )
+
     return () => {
       es.close()
       esRef.current = null
+      timers.forEach(clearTimeout)
     }
   }, [active])
 
   // Mark 100% when loading finishes
   useEffect(() => {
-    if (!active && lines.length > 0) setProgress(100)
+    if (!active) setProgress(p => (p > 0 ? 100 : p))
   }, [active])
 
   return { lines, progress, lastMsg }
