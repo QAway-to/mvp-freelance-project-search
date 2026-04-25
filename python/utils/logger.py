@@ -1,5 +1,5 @@
 import logging
-import asyncio
+import queue
 import json
 from collections import deque
 from datetime import datetime
@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 # Global log queue for real-time streaming - increased size for detailed logging
-log_queue = asyncio.Queue(maxsize=5000)
+log_queue: queue.Queue = queue.Queue(maxsize=5000)
 
 # In-memory buffer for debug endpoint — keeps last 300 messages
 log_buffer: deque = deque(maxlen=300)
@@ -29,49 +29,41 @@ class QueueHandler(logging.Handler):
 
             log_buffer.append(log_entry)
 
-            try:
-                log_queue.put_nowait(serialized)
-            except asyncio.QueueFull:
-                removed = 0
-                while removed < 50 and not log_queue.empty():
-                    try:
-                        log_queue.get_nowait()
-                        removed += 1
-                    except:
-                        break
+            for _ in range(3):
                 try:
                     log_queue.put_nowait(serialized)
-                except:
-                    pass
+                    return
+                except queue.Full:
+                    try:
+                        log_queue.get_nowait()  # drop one oldest
+                    except queue.Empty:
+                        return
 
         except Exception:
             pass
 
 def setup_logging():
-    """Setup logging with Rich console and queue handler"""
-    # Create console for Rich output
-    console = Console()
+    """Setup logging. Idempotent — safe to call multiple times."""
+    root = logging.getLogger()
+    if root.handlers:
+        return logging.getLogger("freelance_mvp")
 
-    # Ensure logs directory exists
-    log_dir = "logs"
     import os
-    os.makedirs(log_dir, exist_ok=True)
-    
-    # Configure root logger
+    os.makedirs("logs", exist_ok=True)
+
+    console = Console()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[
             RichHandler(console=console, rich_tracebacks=True),
-            logging.FileHandler(f"{log_dir}/app.log", encoding="utf-8"),
+            logging.FileHandler("logs/app.log", encoding="utf-8"),
             QueueHandler()
         ]
     )
 
-    # Create logger
     logger = logging.getLogger("freelance_mvp")
     logger.setLevel(logging.INFO)
-
     return logger
 
 # Global logger instance
