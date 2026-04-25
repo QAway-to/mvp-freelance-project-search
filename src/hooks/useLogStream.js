@@ -97,7 +97,7 @@ export function useLogStream(active) {
       setTimeout(() => {
         if (realProgressRef.current < p) {
           setProgress(p)
-          setLastMsg(prev => prev || msg)
+          setLastMsg(msg)
         }
       }, delay)
     )
