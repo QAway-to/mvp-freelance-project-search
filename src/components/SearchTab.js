@@ -10,6 +10,7 @@ export default function SearchTab({ onSearch, isLoading }) {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState(DEFAULT_CATEGORY)
   const [timeLeft, setTimeLeft] = useState('')
+  const [budgetMin, setBudgetMin] = useState('')
   const [hiredMin, setHiredMin] = useState('')
   const [proposalsMax, setProposalsMax] = useState('')
   const [error, setError] = useState(null)
@@ -23,6 +24,7 @@ export default function SearchTab({ onSearch, isLoading }) {
     keywords: q,
     ...(category !== DEFAULT_CATEGORY ? { category } : {}),
     timeLeft: timeLeft ? parseInt(timeLeft, 10) : null,
+    budgetMin: budgetMin ? parseInt(budgetMin, 10) : null,
     hiredMin: hiredMin ? parseInt(hiredMin, 10) : null,
     proposalsMax: proposalsMax ? parseInt(proposalsMax, 10) : null,
   })
@@ -107,6 +109,18 @@ export default function SearchTab({ onSearch, isLoading }) {
       </div>
 
       <div className="form-group form-group-row">
+        <div className="form-field-inline">
+          <label className="form-label-inline">бюджет от</label>
+          <input
+            type="number"
+            value={budgetMin}
+            onChange={(e) => setBudgetMin(e.target.value)}
+            placeholder="₽"
+            min="0"
+            className="form-input-inline"
+            disabled={isLoading}
+          />
+        </div>
         <div className="form-field-inline">
           <label className="form-label-inline">time ≤</label>
           <input

@@ -48,17 +48,14 @@ export default function ProjectCard({ project }) {
       )}
 
       <div className="project-meta">
-        {project.budget && (
-          <span><span className="meta-key">budget</span>{project.budget}</span>
-        )}
         {project.timeLeft != null && (
-          <span><span className="meta-key">time</span>{project.timeLeft}h</span>
+          <span><span className="meta-key">time </span>{project.timeLeft}h</span>
         )}
-        {project.hired != null && (
-          <span><span className="meta-key">hired</span>{project.hired}%</span>
+        {project.budget && (
+          <span><span className="meta-key">бюджет </span>{project.budget}</span>
         )}
         {project.proposals != null && (
-          <span><span className="meta-key">props</span>{project.proposals}</span>
+          <span><span className="meta-key">предложений </span>{project.proposals}</span>
         )}
       </div>
 
