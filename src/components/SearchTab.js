@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react'
-import { useDebounce } from '../hooks/useDebounce'
 import { useLocalStorage } from '../hooks/useLocalStorage'
 import { KWORK_CATEGORIES } from '../../lib/kworkCategories'
 
@@ -20,8 +19,6 @@ export default function SearchTab({ onSearch, isLoading }) {
 
   useEffect(() => { onSearchRef.current = onSearch }, [onSearch])
 
-  const debouncedQuery = useDebounce(query, 600)
-
   const buildParams = (q) => ({
     keywords: q,
     ...(category !== DEFAULT_CATEGORY ? { category } : {}),
@@ -35,16 +32,6 @@ export default function SearchTab({ onSearch, isLoading }) {
     if (!trimmed) return
     setHistory(prev => [trimmed, ...prev.filter(h => h !== trimmed)].slice(0, 5))
   }
-
-  useEffect(() => { lastSearchedRef.current = '' }, [category, timeLeft, hiredMin, proposalsMax])
-
-  useEffect(() => {
-    if (debouncedQuery.length >= 3 && debouncedQuery !== lastSearchedRef.current) {
-      lastSearchedRef.current = debouncedQuery
-      pushHistory(debouncedQuery)
-      onSearchRef.current(buildParams(debouncedQuery))
-    }
-  }, [debouncedQuery, category, timeLeft, hiredMin, proposalsMax])
 
   const handleSubmit = (e) => {
     e.preventDefault()
