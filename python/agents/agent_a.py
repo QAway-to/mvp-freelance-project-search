@@ -135,6 +135,7 @@ class AgentA:
         try:
             # Selenium 4.15+ has built-in manager
             self.driver = webdriver.Chrome(options=options)
+            self.driver.set_page_load_timeout(30)
             log_agent_action("Agent A", "✅ [SELENIUM] Chrome driver initialized successfully")
         except Exception as e:
             log_agent_action("Agent A", f"⚠️ [SELENIUM] Chrome driver setup failed: {str(e)[:200]}")
@@ -144,6 +145,7 @@ class AgentA:
                 service = Service()
                 service.service_args = ['--verbose']  # Enable verbose logging
                 self.driver = webdriver.Chrome(service=service, options=options)
+                self.driver.set_page_load_timeout(30)
                 log_agent_action("Agent A", "✅ [SELENIUM] Chrome driver initialized with service")
             except Exception as e2:
                 error_msg = str(e2)[:500]  # Limit error message length
@@ -450,10 +452,15 @@ class AgentA:
                             if pages:
                                 max_p = max(pages)
                                 log_agent_action("Agent A", f"📑 [SELENIUM] Found {max_p} total pages. Switching to last page for reverse search.")
-                                # Redirect to last page instead of continuing from p1
                                 page = max_p
                                 reverse_page_set = True
-                                self.driver.get(f"{search_url.replace('page=1', f'page={max_p}')}")
+                                if keywords_encoded:
+                                    last_page_url = f"{config.KWORK_PROJECTS_URL}?keyword={keywords_encoded}&page={max_p}&a=1"
+                                else:
+                                    last_page_url = f"{config.KWORK_PROJECTS_URL}?page={max_p}&a=1"
+                                if budget_params:
+                                    last_page_url += f"&{budget_params}"
+                                self.driver.get(last_page_url)
                                 log_agent_action("Agent A", f"🔄 [SELENIUM] Switched to last page {max_p}")
                     except Exception as pg_e:
                         log_agent_action("Agent A", f"⚠️ Error finding max page: {pg_e}", level="DEBUG")
