@@ -9,6 +9,7 @@ import json
 
 from config import config
 from agents.agent_a import AgentA
+from agents.search_params import SearchParams
 from utils.logger import setup_logging, log_queue, log_buffer, log_agent_action
 
 setup_logging()
@@ -31,28 +32,29 @@ async def health_check():
     return {"status": "healthy", "service": "agent-a"}
 
 
+_SSE_KEEPALIVE_TIMEOUT = 15.0
+
+
 @app.get("/logs/stream")
 async def stream_logs():
     async def event_generator():
         while True:
             try:
-                batch = []
-                while len(batch) < 20:
-                    try:
-                        msg = log_queue.get_nowait()
-                        batch.append(msg)
-                    except queue.Empty:
-                        break
-                if batch:
-                    for msg in batch:
-                        yield f"data: {msg}\n\n"
-                    await asyncio.sleep(0)
-                    continue
+                msg = await asyncio.to_thread(log_queue.get, True, _SSE_KEEPALIVE_TIMEOUT)
+            except queue.Empty:
                 yield ": keepalive\n\n"
-                await asyncio.sleep(0.05)
-            except Exception:
-                yield 'data: {"error": "stream_error"}\n\n'
-                await asyncio.sleep(0.1)
+                continue
+            except asyncio.CancelledError:
+                break
+
+            yield f"data: {msg}\n\n"
+
+            while True:
+                try:
+                    msg = log_queue.get_nowait()
+                except queue.Empty:
+                    break
+                yield f"data: {msg}\n\n"
 
     return StreamingResponse(
         event_generator(),
@@ -77,16 +79,15 @@ async def start_agent():
 @app.post("/agent/run-session")
 async def run_single_session(request: Request):
     data = await request.json()
-    budget_filters = data.get("budget_filters", [])
-    config.BUDGET_FILTERS = [int(f) for f in budget_filters if str(f).isdigit()]
+    budget_filters = tuple(int(f) for f in data.get("budget_filters", []) if str(f).isdigit())
 
     if agent_a.running:
         return {"status": "busy", "message": "Agent running in continuous mode.", "agent_status": agent_a.status}
     if agent_a.status == "running":
         return {"status": "busy", "message": "Session already running.", "agent_status": agent_a.status}
 
-    asyncio.create_task(agent_a.run_session())
-    log_agent_action("API", f"Single session requested (Filters: {config.BUDGET_FILTERS})")
+    asyncio.create_task(agent_a.run_session(budget_filters))
+    log_agent_action("API", f"Single session requested (Filters: {budget_filters})")
     return {"status": "session_started", "agent_status": agent_a.status}
 
 
@@ -160,34 +161,24 @@ async def api_search(request: Request):
 
     data = await request.json()
     keywords = (data.get("keywords") or "").strip()
+    max_urgency = int(data["timeLeft"]) if data.get("timeLeft") is not None else config.MAX_URGENCY_HOURS
+
+    keywords_list = tuple(kw.strip() for kw in keywords.split(",") if kw.strip()) if keywords else ()
+    params = SearchParams(
+        keywords_list=keywords_list,
+        max_urgency_hours=max_urgency,
+    )
+
     log_agent_action("API", f"[SEARCH] request received: keywords={keywords!r} mode={config.MODE} driver={agent_a.driver is not None} logged_in={agent_a.logged_in}")
 
-    max_urgency = int(data["timeLeft"]) if data.get("timeLeft") else config.MAX_URGENCY_HOURS
-
-    original_keywords = list(config.SEARCH_KEYWORDS_LIST)
-    original_keyword = config.SEARCH_KEYWORD
-    original_urgency = config.MAX_URGENCY_HOURS
-
-    if keywords:
-        config.SEARCH_KEYWORDS_LIST = [kw.strip() for kw in keywords.split(",") if kw.strip()]
-        config.SEARCH_KEYWORD = config.SEARCH_KEYWORDS_LIST[0]
-    else:
-        config.SEARCH_KEYWORDS_LIST = []
-        config.SEARCH_KEYWORD = ""
-    config.MAX_URGENCY_HOURS = max_urgency
-
     try:
-        log_agent_action("API", f"[SEARCH] dispatching to thread, keywords={config.SEARCH_KEYWORDS_LIST}")
-        projects = await asyncio.to_thread(agent_a.search_projects)
+        log_agent_action("API", f"[SEARCH] dispatching to thread, keywords={list(params.keywords_list)}")
+        projects = await asyncio.to_thread(agent_a.search_projects, params)
         log_agent_action("API", f"[SEARCH] thread returned {len(projects)} projects in {time.time()-t0:.1f}s")
         asyncio.create_task(agent_a.notify_suitable_projects(projects))
     except Exception as exc:
         log_agent_action("API", f"[SEARCH] thread raised exception: {exc}", level="ERROR")
         raise
-    finally:
-        config.SEARCH_KEYWORDS_LIST = original_keywords
-        config.SEARCH_KEYWORD = original_keyword
-        config.MAX_URGENCY_HOURS = original_urgency
 
     hired_min = int(data["hiredMin"]) if data.get("hiredMin") else None
     proposals_max = int(data["proposalsMax"]) if data.get("proposalsMax") else None

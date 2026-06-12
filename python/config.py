@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 # Try to load .env file, but don't fail if it doesn't exist
 try:
     load_dotenv()
-except:
+except Exception:
     pass
 
 class Config:
