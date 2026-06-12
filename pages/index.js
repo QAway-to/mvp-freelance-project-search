@@ -3,12 +3,27 @@ import { useState } from 'react'
 import ProjectSearchForm from '../src/components/ProjectSearchForm'
 import ProjectResults from '../src/components/ProjectResults'
 import LogMonitor from '../src/components/LogMonitor'
+import SearchHistory from '../src/components/SearchHistory'
+import { useLocalStorage } from '../src/hooks/useLocalStorage'
+
+const MAX_HISTORY = 10
 
 export default function Home() {
   const [projects, setProjects] = useState([])
   const [status, setStatus] = useState('waiting')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [searchHistory, setSearchHistory] = useLocalStorage('search_history', [])
+
+  const saveToHistory = (params, results) => {
+    const entry = {
+      id: Date.now(),
+      timestamp: new Date().toISOString(),
+      params,
+      projects: results,
+    }
+    setSearchHistory(prev => [entry, ...prev].slice(0, MAX_HISTORY))
+  }
 
   const handleSearch = async (searchParams) => {
     setIsLoading(true)
@@ -25,8 +40,10 @@ export default function Home() {
       const data = await response.json()
 
       if (data.status === 'success') {
-        setProjects(data.projects || [])
+        const results = data.projects || []
+        setProjects(results)
         setStatus('success')
+        saveToHistory(searchParams, results)
       } else {
         setError(data.message || 'search failed')
         setStatus('error')
@@ -95,6 +112,12 @@ export default function Home() {
         <LogMonitor isActive={isLoading} />
 
         <ProjectResults projects={projects} />
+
+        <SearchHistory
+          history={searchHistory}
+          onRerun={handleSearch}
+          onClear={() => setSearchHistory([])}
+        />
       </main>
     </>
   )
