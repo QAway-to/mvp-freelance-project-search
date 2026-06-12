@@ -1,4 +1,5 @@
 import asyncio
+import random
 import time
 import re
 import os
@@ -16,6 +17,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from urllib.parse import quote_plus
+
+from agents.search_params import SearchParams
 
 from config import config
 from utils.logger import logger, log_agent_action
@@ -252,7 +255,7 @@ class AgentA:
         if max_sec is None:
             max_sec = config.DELAY_BETWEEN_ACTIONS_MAX
 
-        delay = min_sec + (max_sec - min_sec) * (time.time() % 1)  # Pseudo-random
+        delay = random.uniform(min_sec, max_sec)
         time.sleep(delay)
         return delay
 
@@ -307,17 +310,15 @@ class AgentA:
 
         time.sleep(duration % 2)  # Remaining time
 
-    def search_projects(self) -> List[Dict[str, Any]]:
+    def search_projects(self, params: SearchParams) -> List[Dict[str, Any]]:
         """Search for projects with keywords"""
-        keywords_str = ", ".join(config.SEARCH_KEYWORDS_LIST)
+        keywords_str = ", ".join(params.keywords_list)
         log_agent_action("Agent A", f"Searching projects with keywords: {keywords_str}")
 
         if config.MODE == "demo":
-            # Demo mode: generate fake projects
             return self._generate_demo_projects()
         else:
-            # Full mode: real search on Kwork
-            return self._search_real_projects()
+            return self._search_real_projects(params)
 
     def _generate_demo_projects(self) -> List[Dict[str, Any]]:
         """Generate demo projects - DISABLED: Returns empty list"""
@@ -383,7 +384,7 @@ class AgentA:
             # On error, assume button is available (to be safe)
             return True
 
-    def _search_real_projects(self) -> List[Dict[str, Any]]:
+    def _search_real_projects(self, params: SearchParams) -> List[Dict[str, Any]]:
         """Real search on Kwork with pagination, proposal button check, and semantic ranking"""
         log_agent_action("Agent A", "🌐 [SELENIUM] Real search mode: accessing Kwork")
 
@@ -406,7 +407,7 @@ class AgentA:
             except Exception as e:
                 log_agent_action("Agent A", f"[SEARCH] login FAILED: {e}", level="ERROR")
 
-        keywords_str = ','.join(config.SEARCH_KEYWORDS_LIST)
+        keywords_str = ','.join(params.keywords_list)
         keywords_encoded = quote_plus(keywords_str) if keywords_str else ""
         log_agent_action("Agent A", f"📋 [SELENIUM] Search keywords: {keywords_str or '(none — filter only)'}")
         log_agent_action("Agent A", f"📋 [SELENIUM] Target: Find up to 10 relevant projects with proposal button available, output top 5")
@@ -424,7 +425,7 @@ class AgentA:
         while scraped_listing_pages < max_pages and len(all_projects) < max_relevant_projects:
             # Build search URL for current page
             # Inject budget filters if they exist
-            budget_params = "&".join([f"prices-filters[]={f}" for f in config.BUDGET_FILTERS])
+            budget_params = "&".join([f"prices-filters[]={f}" for f in params.budget_filters])
             if keywords_encoded:
                 search_url = f"{config.KWORK_PROJECTS_URL}?keyword={keywords_encoded}&page={page}&a=1"
             else:
@@ -496,7 +497,7 @@ class AgentA:
                     urgency_text = urgency_element.text.strip()
                     urgency_hours = self.parse_urgency(urgency_text)
 
-                    if urgency_hours > config.MAX_URGENCY_HOURS:
+                    if urgency_hours > params.max_urgency_hours:
                         continue
 
                     # Title and link
@@ -732,7 +733,7 @@ class AgentA:
         except Exception as e:
             log_agent_action("Agent A", f"❌ Error sending to n8n: {str(e)}")
 
-    async def run_session(self):
+    async def run_session(self, budget_filters: tuple[int, ...] = ()):
         """Run one search session"""
         session_start = datetime.now()
         self.current_session_start = session_start
@@ -754,7 +755,12 @@ class AgentA:
             # Step 1: Search projects (includes semantic evaluation and ranking)
             step_start = datetime.now()
             log_agent_action("Agent A", "🔍 [SESSION] Step 1/2: Searching and evaluating projects...")
-            projects = self.search_projects()
+            session_params = SearchParams(
+                keywords_list=tuple(config.SEARCH_KEYWORDS_LIST),
+                max_urgency_hours=config.MAX_URGENCY_HOURS,
+                budget_filters=budget_filters,
+            )
+            projects = self.search_projects(session_params)
             step_duration = (datetime.now() - step_start).total_seconds()
             log_agent_action("Agent A", f"✅ [SESSION] Step 1/2 completed: Found {len(projects)} relevant projects in {step_duration:.2f}s")
 
