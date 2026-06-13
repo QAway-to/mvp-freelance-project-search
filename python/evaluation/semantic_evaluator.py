@@ -8,9 +8,9 @@ from typing import Dict, Any, Tuple, List, Optional
 import numpy as np
 from utils.logger import log_agent_action
 
-# Try to import google-generativeai, fail gracefully if not available
+# Try to import google-genai, fail gracefully if not available
 try:
-    import google.generativeai as genai
+    from google import genai
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
@@ -71,10 +71,7 @@ class SemanticEvaluator:
             return
         
         try:
-            # Configure Gemini API
-            genai.configure(api_key=self.api_key)
-            
-            # Get embeddings for reference examples
+            self._client = genai.Client(api_key=self.api_key)
             log_agent_action("SemanticEvaluator", "🔄 Initializing semantic evaluator with reference examples...")
             self._load_reference_embeddings()
             self.initialized = True
@@ -82,28 +79,27 @@ class SemanticEvaluator:
         except Exception as e:
             log_agent_action("SemanticEvaluator", f"❌ Failed to initialize semantic evaluator: {str(e)}")
             self.initialized = False
+            self._client = None
     
     def _get_embedding(self, text: str) -> Optional[np.ndarray]:
         """Get embedding for text using Gemini text-embedding-004 model"""
-        if not self.initialized or not genai:
-            log_agent_action("SemanticEvaluator", f"⚠️ Cannot get embedding: initialized={self.initialized}, genai={genai is not None}")
+        if not self.initialized or not self._client:
+            log_agent_action("SemanticEvaluator", f"⚠️ Cannot get embedding: initialized={self.initialized}")
             return None
-        
+
         try:
-            # Use text-embedding-004 model
             log_agent_action("SemanticEvaluator", f"🔄 Requesting embedding for text: {text[:50]}...")
-            result = genai.embed_content(
-                model="models/text-embedding-004",
-                content=text,
-                task_type="retrieval_document"
+            result = self._client.models.embed_content(
+                model="text-embedding-004",
+                contents=text,
             )
-            
-            if 'embedding' not in result:
-                log_agent_action("SemanticEvaluator", f"❌ No 'embedding' key in result: {list(result.keys())}")
+
+            raw = result.embeddings[0].values if result.embeddings else None
+            if not raw:
+                log_agent_action("SemanticEvaluator", "❌ Empty embedding returned")
                 return None
-            
-            embedding = result['embedding']
-            embedding_array = np.array(embedding)
+
+            embedding_array = np.array(raw)
             
             # Validate embedding
             if embedding_array is None or len(embedding_array) == 0:

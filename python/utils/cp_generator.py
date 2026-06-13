@@ -1,18 +1,18 @@
-import google.generativeai as genai
+import asyncio
+from google import genai
 from config import config
 from utils.logger import log_agent_action
 
 class CPGenerator:
     def __init__(self):
         if config.GEMINI_API_KEY:
-            genai.configure(api_key=config.GEMINI_API_KEY)
-            self.model = genai.GenerativeModel('gemini-1.5-flash')
+            self._client = genai.Client(api_key=config.GEMINI_API_KEY)
         else:
-            self.model = None
+            self._client = None
 
     async def generate_proposal(self, project_description: str, budget: str = "Не указан") -> str:
         """Generate a commercial proposal using Gemini"""
-        if not self.model:
+        if not self._client:
             return "Gemini API key not configured."
 
         try:
@@ -20,8 +20,11 @@ class CPGenerator:
                 description=project_description,
                 budget=budget
             )
-            import asyncio
-            response = await asyncio.to_thread(self.model.generate_content, prompt)
+            response = await asyncio.to_thread(
+                self._client.models.generate_content,
+                model='gemini-1.5-flash',
+                contents=prompt,
+            )
             return response.text.strip()
         except Exception as e:
             log_agent_action("CP Generator", f"❌ Error generating CP: {e}", level="ERROR")
