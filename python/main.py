@@ -2,6 +2,7 @@ import asyncio
 import queue
 import os
 import uvicorn
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse, PlainTextResponse, JSONResponse
 import logging
@@ -10,13 +11,22 @@ import json
 from config import config
 from agents.agent_a import AgentA
 from agents.search_params import SearchParams
+from telegram_bot import telegram_bot
 from utils.logger import setup_logging, log_queue, log_buffer, log_agent_action
 
 setup_logging()
 
-app = FastAPI(title="Freelance Agent A")
-
 agent_a = AgentA()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await telegram_bot.start()
+    yield
+    await telegram_bot.stop()
+
+
+app = FastAPI(title="Freelance Agent A", lifespan=lifespan)
 
 log_agent_action("App", f"🚀 Application started in {config.MODE.upper()} mode")
 log_agent_action("App", f"📋 Search keywords: {', '.join(config.SEARCH_KEYWORDS_LIST)}")

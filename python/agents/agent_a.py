@@ -23,14 +23,12 @@ from agents.search_params import SearchParams
 from config import config
 from utils.logger import logger, log_agent_action
 from evaluation.evaluator import ProjectEvaluator
-from telegram_bot import TelegramNotifier
 
 class AgentA:
     def __init__(self):
         self.driver = None
         self.logged_in = False
         self.evaluator = ProjectEvaluator()
-        self.telegram = TelegramNotifier() if config.TELEGRAM_BOT_TOKEN else None
         self.status = "stopped"
         self.last_run_time = None
         self.found_projects: List[Dict[str, Any]] = []
@@ -644,20 +642,18 @@ class AgentA:
             return []
 
     async def notify_suitable_projects(self, projects: List[Dict[str, Any]]) -> int:
-        """Send Telegram notifications for suitable projects. Returns count sent."""
-        if not self.telegram:
-            return 0
+        """Send suitable projects to Telegram for КП confirmation."""
+        from telegram_bot import telegram_bot
         suitable = [p for p in projects if p.get("evaluation", {}).get("suitable", False)]
         if not suitable:
             return 0
-        results = await asyncio.gather(
-            *(self.telegram.send_project_notification(p) for p in suitable),
-            return_exceptions=True,
-        )
-        for p, r in zip(suitable, results):
-            if isinstance(r, Exception):
-                log_agent_action("Agent A", f"📱 [TELEGRAM] Failed to notify '{p.get('title','?')[:40]}': {r}")
-        return sum(1 for r in results if not isinstance(r, Exception))
+        try:
+            await telegram_bot.send_projects_for_confirmation(suitable)
+            log_agent_action("Agent A", f"📱 [TELEGRAM] Sent {len(suitable)} projects for КП confirmation")
+            return len(suitable)
+        except Exception as e:
+            log_agent_action("Agent A", f"📱 [TELEGRAM] Failed to send: {e}", level="ERROR")
+            return 0
 
     async def evaluate_and_notify(self, projects: List[Dict[str, Any]]):
         """Evaluate projects and send notifications - projects are already evaluated in _search_real_projects"""
