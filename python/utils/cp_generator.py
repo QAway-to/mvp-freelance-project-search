@@ -20,8 +20,8 @@ class CPGenerator:
                 description=project_description,
                 budget=budget
             )
-            
-            response = self.model.generate_content(prompt)
+            import asyncio
+            response = await asyncio.to_thread(self.model.generate_content, prompt)
             return response.text.strip()
         except Exception as e:
             log_agent_action("CP Generator", f"❌ Error generating CP: {e}", level="ERROR")

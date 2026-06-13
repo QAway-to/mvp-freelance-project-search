@@ -15,6 +15,7 @@ export default function SearchTab({ onSearch, isLoading }) {
   const [proposalsMax, setProposalsMax] = useState('')
   const [error, setError] = useState(null)
   const [history, setHistory] = useLocalStorage('recent_searches', [])
+  const [favCats, setFavCats] = useLocalStorage('fav_categories', [])
   const lastSearchedRef = useRef('')
   const onSearchRef = useRef(onSearch)
 
@@ -44,6 +45,12 @@ export default function SearchTab({ onSearch, isLoading }) {
     onSearchRef.current(buildParams(q))
   }
 
+  const toggleFavCat = (id) => {
+    setFavCats(prev =>
+      prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]
+    )
+  }
+
   const handleChipClick = (chip) => {
     setQuery(chip)
     setError(null)
@@ -55,21 +62,45 @@ export default function SearchTab({ onSearch, isLoading }) {
   return (
     <form onSubmit={handleSubmit}>
       <div className="form-group">
-        <label className="form-label">
-          category
-        </label>
-        <select
-          value={category}
-          onChange={(e) => setCategory(parseInt(e.target.value, 10))}
-          className="form-input"
-          disabled={isLoading}
-        >
-          {KWORK_CATEGORIES.map((cat) => (
-            <option key={cat.id} value={cat.id}>
-              {cat.labelRu}
-            </option>
-          ))}
-        </select>
+        <label className="form-label">category</label>
+        {favCats.length > 0 && (
+          <div className="fav-cat-chips">
+            {KWORK_CATEGORIES.filter(c => favCats.includes(c.id)).map(cat => (
+              <button
+                key={cat.id}
+                type="button"
+                className={`chip ${category === cat.id ? 'chip-active' : ''}`}
+                onClick={() => setCategory(cat.id)}
+                disabled={isLoading}
+              >
+                ★ {cat.labelRu}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="category-row">
+          <select
+            value={category}
+            onChange={(e) => setCategory(parseInt(e.target.value, 10))}
+            className="form-input category-select"
+            disabled={isLoading}
+          >
+            {KWORK_CATEGORIES.map((cat) => (
+              <option key={cat.id} value={cat.id}>
+                {cat.labelRu}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className={`btn btn-sm fav-toggle ${favCats.includes(category) ? 'fav-toggle-active' : ''}`}
+            onClick={() => toggleFavCat(category)}
+            disabled={isLoading}
+            title={favCats.includes(category) ? 'Убрать из избранного' : 'Добавить в избранное'}
+          >
+            {favCats.includes(category) ? '★' : '☆'}
+          </button>
+        </div>
       </div>
 
       <div className="form-group">

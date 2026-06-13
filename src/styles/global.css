@@ -467,6 +467,39 @@ a {
   background: var(--surface);
 }
 
+/* ── FAVORITE CATEGORIES ── */
+.fav-cat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+
+.chip-active {
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+}
+
+.category-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.category-select { flex: 1; }
+
+.fav-toggle {
+  flex-shrink: 0;
+  padding: 0 10px;
+  font-size: 0.9rem;
+  letter-spacing: 0;
+}
+
+.fav-toggle-active {
+  color: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
+
 /* ── SEARCH HISTORY ── */
 .history-section {
   margin-top: 20px;
