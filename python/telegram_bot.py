@@ -19,14 +19,18 @@ class TelegramBot:
         if not config.TELEGRAM_BOT_TOKEN:
             log_agent_action("Telegram", "Bot token not configured — disabled")
             return
-        self._app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
-        self._app.add_handler(
-            MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_reply)
-        )
-        await self._app.initialize()
-        await self._app.start()
-        await self._app.updater.start_polling(drop_pending_updates=True)
-        log_agent_action("Telegram", "Bot started (polling)")
+        try:
+            self._app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
+            self._app.add_handler(
+                MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_reply)
+            )
+            await self._app.initialize()
+            await self._app.start()
+            await self._app.updater.start_polling(drop_pending_updates=True)
+            log_agent_action("Telegram", "Bot started (polling)")
+        except Exception as e:
+            log_agent_action("Telegram", f"Bot startup failed: {e} — running without Telegram", level="WARNING")
+            self._app = None
 
     async def stop(self) -> None:
         if self._app:
