@@ -515,26 +515,30 @@ class AgentA:
                 self.driver.get(search_url)
                 log_agent_action("Agent A", f"✅ [SELENIUM] Page {page} loaded successfully")
                 
-                # Reverse pagination: keyword mode only — favorites list is short, start from page 1
-                if page == 1 and not reverse_page_set and keywords_encoded:
+                # Reverse pagination: find last page, jump to it (both keyword and favourites)
+                if page == 1 and not reverse_page_set:
                     try:
                         pagination_items = self.driver.find_elements(By.CSS_SELECTOR, ".pagination__item")
                         if pagination_items:
-                            pages = []
-                            for item in pagination_items:
-                                if item.text.isdigit():
-                                    pages.append(int(item.text))
-
+                            pages = [int(item.text) for item in pagination_items if item.text.isdigit()]
                             if pages:
                                 max_p = max(pages)
-                                log_agent_action("Agent A", f"📑 [SELENIUM] Found {max_p} total pages. Switching to last page for reverse search.")
+                                log_agent_action("Agent A", f"📑 [SELENIUM] Found {max_p} total pages. Jumping to last page.")
                                 page = max_p
                                 reverse_page_set = True
-                                last_page_url = f"{config.KWORK_PROJECTS_URL}?keyword={keywords_encoded}&page={max_p}"
+                                if keywords_encoded:
+                                    last_page_url = f"{config.KWORK_PROJECTS_URL}?keyword={keywords_encoded}&page={max_p}"
+                                else:
+                                    last_page_url = (
+                                        f"{config.KWORK_PROJECTS_URL}?type=favourite&a=1"
+                                        f"&kworks-filters[]=0&kworks-filters[]=1"
+                                        f"&prices-filters[]=3&prices-filters[]=4"
+                                        f"&page={max_p}"
+                                    )
                                 if budget_params:
                                     last_page_url += f"&{budget_params}"
                                 self.driver.get(last_page_url)
-                                log_agent_action("Agent A", f"🔄 [SELENIUM] Switched to last page {max_p}")
+                                log_agent_action("Agent A", f"🔄 [SELENIUM] Jumped to last page {max_p}")
                     except Exception as pg_e:
                         log_agent_action("Agent A", f"⚠️ Error finding max page: {pg_e}", level="DEBUG")
 
@@ -693,11 +697,11 @@ class AgentA:
             scraped_listing_pages += 1
             log_agent_action("Agent A", f"📄 [LISTING] Page scraped: {len(page_projects)} added | urgency_filtered={_skipped_urgency} | other_err={_skipped_err} | total={len(all_projects)}")
 
-            # Reverse pagination: go backwards page by page
+            # Reverse pagination for both modes: last → last-1 → last-2
             if page > 1:
                 page -= 1
             else:
-                break  # Reached page 1, done
+                    break
 
         log_agent_action("Agent A", f"✅ [LISTING] Collection complete: {len(all_projects)} projects")
 
