@@ -141,8 +141,8 @@ async def generate_cp(request: Request):
     budget = data.get("budget", "Не указан")
     if not description:
         return {"status": "error", "message": "Description is required"}
-    from utils.cp_generator import cp_generator
-    proposal = await cp_generator.generate_proposal(description, budget)
+    from utils.cp_generator import generate_proposal
+    proposal = await generate_proposal({"description": description, "budget": budget, "title": ""})
     return {"status": "success", "proposal": proposal}
 
 

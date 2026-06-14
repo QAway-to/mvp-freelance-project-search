@@ -595,45 +595,15 @@ class AgentA:
             log_agent_action("Agent A", f"🔁 [LISTING] Removed {len(all_projects) - len(unique)} duplicates, {len(unique)} unique projects")
         all_projects = unique
 
-        # Now evaluate all projects and rank by semantic similarity
-        if len(all_projects) > 0:
-            log_agent_action("Agent A", f"🤖 [SEMANTIC] Evaluating {len(all_projects)} projects for semantic relevance...")
-            
-            # Evaluate each project and add semantic score
-            evaluated_projects = []
-            for project in all_projects:
-                try:
-                    score, reasons = self.evaluator.evaluate_project(project)
-                    project["evaluation"] = {
-                        "score": score,
-                        "reasons": reasons,
-                        "suitable": score >= config.EVALUATION_THRESHOLD
-                    }
-                    
-                    # Extract semantic similarity if available
-                    semantic_score = 0.0
-                    for reason in reasons:
-                        if "Similarity:" in reason:
-                            try:
-                                semantic_score = float(reason.split("Similarity:")[1].strip().split()[0])
-                            except Exception:
-                                pass
-                    
-                    project["semantic_score"] = semantic_score
-                    evaluated_projects.append(project)
-                    
-                except Exception as e:
-                    log_agent_action("Agent A", f"⚠️ [EVALUATION] Error evaluating project: {str(e)[:100]}")
-                    continue
-            
-            # Sort by semantic score (highest first), then by total score
-            evaluated_projects.sort(key=lambda x: (x.get("semantic_score", 0.0), x.get("evaluation", {}).get("score", 0.0)), reverse=True)
-            
-            log_agent_action("Agent A", f"📊 [SEMANTIC] Returning {len(evaluated_projects)} projects sorted by relevance")
-            return evaluated_projects
-        else:
-            log_agent_action("Agent A", f"⚠️ [SELENIUM] No projects found with proposal button available")
-            return []
+        # Semantic scoring disabled — all found projects pass through
+        if all_projects:
+            for p in all_projects:
+                p.setdefault("evaluation", {"score": 1.0, "reasons": [], "suitable": True})
+            log_agent_action("Agent A", f"📋 Returning {len(all_projects)} projects")
+            return all_projects
+
+        log_agent_action("Agent A", "⚠️ [SELENIUM] No projects found")
+        return []
 
     async def notify_suitable_projects(self, projects: List[Dict[str, Any]]) -> int:
         """Send suitable projects to Telegram for КП confirmation."""
