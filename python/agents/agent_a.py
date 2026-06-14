@@ -487,12 +487,29 @@ class AgentA:
 
             for card in project_cards:
                 try:
-                    # Urgency check
-                    urgency_element = card.find_element(By.CSS_SELECTOR, ".want-card__informers-row span.mr8")
-                    urgency_text = urgency_element.text.strip()
-                    urgency_hours = self.parse_urgency(urgency_text)
+                    # Urgency: parsed separately so a missing element never skips the whole card.
+                    # urgency_hours=None means "unknown" — card is included (no time data to filter on).
+                    urgency_text = ""
+                    urgency_hours = None
+                    for u_sel in [
+                        ".want-card__informers-row span.mr8",
+                        ".want-card__informers-row span",
+                        "[class*='urgency']",
+                        "[class*='time']",
+                    ]:
+                        try:
+                            uel = card.find_element(By.CSS_SELECTOR, u_sel)
+                            t = uel.text.strip()
+                            if 'Осталось' in t or 'осталось' in t:
+                                urgency_text = t
+                                parsed = self.parse_urgency(t)
+                                if parsed < 999.0:
+                                    urgency_hours = parsed
+                                break
+                        except Exception:
+                            continue
 
-                    if urgency_hours > params.max_urgency_hours:
+                    if urgency_hours is not None and urgency_hours > params.max_urgency_hours:
                         continue
 
                     # Title and link
@@ -559,7 +576,7 @@ class AgentA:
                     if hm:
                         hired = int(hm.group(1) if hm.group(1) is not None else hm.group(2))
 
-                    log_agent_action("Agent A", f"📋 [LISTING] {title[:45]} | budget={budget} | proposals={proposals} | hired={hired}")
+                    log_agent_action("Agent A", f"📋 [LISTING] {title[:45]} | urgency={urgency_hours}h | budget={budget} | proposals={proposals} | hired={hired}")
 
                     page_projects.append({
                         "id": url.split('/')[-2] if '/' in url else "unknown",

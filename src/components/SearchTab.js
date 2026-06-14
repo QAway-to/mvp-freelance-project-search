@@ -5,7 +5,7 @@ const filterCyrillic = (text) => text.replace(/[^а-яА-ЯёЁ\s,.-]/g, '')
 
 export default function SearchTab({ onSearch, isLoading }) {
   const [query, setQuery] = useState('')
-  const [timeLeft, setTimeLeft] = useState('72')
+  const [timeLeft, setTimeLeft] = useState('24')
   const [budgetMin, setBudgetMin] = useState('20000')
   const [hiredMin, setHiredMin] = useState('')
   const [proposalsMax, setProposalsMax] = useState('')
