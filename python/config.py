@@ -39,6 +39,8 @@ class Config:
     # Credentials
     KWORK_EMAIL: Optional[str] = os.getenv('KWORK_EMAIL')
     KWORK_PASSWORD: Optional[str] = os.getenv('KWORK_PASSWORD')
+    # Session cookies JSON (alternative to login — paste from browser DevTools)
+    KWORK_COOKIES: Optional[str] = os.getenv('KWORK_COOKIES')
 
     # Telegram
     TELEGRAM_BOT_TOKEN: Optional[str] = os.getenv('TELEGRAM_BOT_TOKEN')

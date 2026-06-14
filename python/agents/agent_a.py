@@ -75,6 +75,35 @@ class AgentA:
             log_agent_action("Agent A", f"❌ [SELENIUM] Driver setup failed: {str(e)[:300]}", level="ERROR")
             raise
 
+    def _inject_cookies_from_env(self) -> bool:
+        """Load cookies from KWORK_COOKIES env var and inject into Selenium."""
+        if not config.KWORK_COOKIES:
+            return False
+        try:
+            import json
+            cookies = json.loads(config.KWORK_COOKIES)
+            self.driver.get(config.KWORK_BASE_URL)
+            self.human_delay(1, 2)
+            injected = 0
+            for c in cookies:
+                try:
+                    # Selenium expects specific keys only
+                    self.driver.add_cookie({
+                        "name": c["name"],
+                        "value": c["value"],
+                        "domain": c.get("domain", ".kwork.ru"),
+                        "path": c.get("path", "/"),
+                    })
+                    injected += 1
+                except Exception:
+                    pass
+            log_agent_action("Agent A", f"🍪 [AUTH] Injected {injected}/{len(cookies)} cookies from KWORK_COOKIES env")
+            self.logged_in = True
+            return True
+        except Exception as e:
+            log_agent_action("Agent A", f"❌ [AUTH] Failed to load KWORK_COOKIES: {e}", level="ERROR")
+            return False
+
     def login(self):
         """Login via Selenium on kwork.ru/login dedicated page."""
         if self.logged_in:
@@ -82,6 +111,11 @@ class AgentA:
 
         if not self.driver:
             self.setup_driver()
+
+        # Try cookie-based auth first (no captcha)
+        if config.KWORK_COOKIES:
+            log_agent_action("Agent A", "🍪 [AUTH] KWORK_COOKIES found — using cookie auth instead of login form")
+            return self._inject_cookies_from_env()
 
         if not config.KWORK_EMAIL or not config.KWORK_PASSWORD:
             log_agent_action("Agent A", "⚠️ [AUTH] Credentials missing, skipping login", level="WARNING")
