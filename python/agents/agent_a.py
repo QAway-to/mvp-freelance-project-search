@@ -190,70 +190,20 @@ class AgentA:
         
         try:
             self.driver.get(config.KWORK_LOGIN_URL)
-            actual_login_url = self.driver.current_url
-            log_agent_action("Agent A", f"🔐 [AUTH] Login page URL: {actual_login_url}")
+            self.human_delay(2, 4)
 
-            # Wait for page render, then open the login modal by clicking the login button
-            self.human_delay(3, 4)
-            modal_opened = self.driver.execute_script("""
-                var selectors = [
-                    'a[href*="login"]', '.header__login', '[class*="login"]',
-                    'button[class*="login"]', 'a[class*="login"]'
-                ];
-                for (var i=0; i<selectors.length; i++) {
-                    var btn = document.querySelector(selectors[i]);
-                    if (btn && btn.offsetParent !== null) { btn.click(); return selectors[i]; }
-                }
-                return null;
-            """)
-            log_agent_action("Agent A", f"🔐 [AUTH] Modal trigger: {modal_opened}")
-            self.human_delay(2, 3)
+            # Find login fields
+            email_field = self.driver.find_element(By.NAME, "login")
+            password_field = self.driver.find_element(By.NAME, "password")
 
-            js_check = self.driver.execute_script("""
-                var inputs = Array.from(document.querySelectorAll('input'));
-                return inputs.map(function(i){ return i.outerHTML.substring(0,120); });
-            """)
-            log_agent_action("Agent A", f"🔐 [AUTH] Inputs after modal: {js_check[:5]}")
+            email_field.send_keys(config.KWORK_EMAIL)
+            self.human_delay(0.5, 1.5)
+            password_field.send_keys(config.KWORK_PASSWORD)
+            self.human_delay(0.5, 1.5)
 
-            # Fill fields via JS — bypasses rendering/visibility issues
-            filled = self.driver.execute_script("""
-                var selectors = ['[name="login"]','[name="email"]','input[type="email"]'];
-                var emailField = null;
-                for (var i=0; i<selectors.length; i++) {
-                    emailField = document.querySelector(selectors[i]);
-                    if (emailField) break;
-                }
-                var passField = document.querySelector('[name="password"]') ||
-                                document.querySelector('input[type="password"]');
-                if (!emailField || !passField) return false;
-                var nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                    window.HTMLInputElement.prototype, 'value').set;
-                nativeInputValueSetter.call(emailField, arguments[0]);
-                emailField.dispatchEvent(new Event('input', {bubbles:true}));
-                nativeInputValueSetter.call(passField, arguments[1]);
-                passField.dispatchEvent(new Event('input', {bubbles:true}));
-                return true;
-            """, config.KWORK_EMAIL, config.KWORK_PASSWORD)
-
-            if not filled:
-                snippet = self.driver.page_source[300:800].replace('\n', ' ')
-                log_agent_action("Agent A", f"❌ [AUTH] JS fill failed. Page mid-snippet: {snippet}", level="ERROR")
-                return False
-
-            log_agent_action("Agent A", "✅ [AUTH] Fields filled via JS")
-            self.human_delay(0.5, 1.0)
-
-            # Submit via JS click on submit button
-            submitted = self.driver.execute_script("""
-                var btn = document.querySelector('button.js-login-submit') ||
-                          document.querySelector('button[type="submit"]') ||
-                          document.querySelector('input[type="submit"]');
-                if (btn) { btn.click(); return true; }
-                return false;
-            """)
-            if not submitted:
-                log_agent_action("Agent A", "❌ [AUTH] Cannot find/click submit button", level="ERROR")
-                return False
+            # Find and click submit button
+            submit_btn = self.driver.find_element(By.CSS_SELECTOR, "button.js-login-submit")
+            submit_btn.click()
             
             self.human_delay(3, 5)
 
