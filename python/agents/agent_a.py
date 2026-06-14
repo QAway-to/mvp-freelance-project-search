@@ -102,7 +102,8 @@ class AgentA:
 
             # Find login/email field
             login_field = None
-            for sel in ['input[name="username"]', 'input[name="login"]', 'input[name="email"]', 'input[type="email"]']:
+            for sel in ['input[placeholder="Электронная почта или логин"]', 'input.input-style',
+                        'input[name="username"]', 'input[name="login"]', 'input[name="email"]']:
                 els = self.driver.find_elements(By.CSS_SELECTOR, sel)
                 if els:
                     login_field = els[0]
