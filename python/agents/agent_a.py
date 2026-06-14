@@ -193,13 +193,27 @@ class AgentA:
             actual_login_url = self.driver.current_url
             log_agent_action("Agent A", f"🔐 [AUTH] Login page URL: {actual_login_url}")
 
-            # Wait 5s for initial render then check via JS what's actually in DOM
-            self.human_delay(5, 6)
+            # Wait for page render, then open the login modal by clicking the login button
+            self.human_delay(3, 4)
+            modal_opened = self.driver.execute_script("""
+                var selectors = [
+                    'a[href*="login"]', '.header__login', '[class*="login"]',
+                    'button[class*="login"]', 'a[class*="login"]'
+                ];
+                for (var i=0; i<selectors.length; i++) {
+                    var btn = document.querySelector(selectors[i]);
+                    if (btn && btn.offsetParent !== null) { btn.click(); return selectors[i]; }
+                }
+                return null;
+            """)
+            log_agent_action("Agent A", f"🔐 [AUTH] Modal trigger: {modal_opened}")
+            self.human_delay(2, 3)
+
             js_check = self.driver.execute_script("""
                 var inputs = Array.from(document.querySelectorAll('input'));
                 return inputs.map(function(i){ return i.outerHTML.substring(0,120); });
             """)
-            log_agent_action("Agent A", f"🔐 [AUTH] Inputs found on page: {js_check[:5]}")
+            log_agent_action("Agent A", f"🔐 [AUTH] Inputs after modal: {js_check[:5]}")
 
             # Fill fields via JS — bypasses rendering/visibility issues
             filled = self.driver.execute_script("""
