@@ -171,7 +171,8 @@ async def api_search(request: Request):
 
     data = await request.json()
     keywords = (data.get("keywords") or "").strip()
-    max_urgency = int(data["timeLeft"]) if data.get("timeLeft") is not None else config.MAX_URGENCY_HOURS
+    # None / missing timeLeft = no time filter (show all regardless of deadline)
+    max_urgency = int(data["timeLeft"]) if data.get("timeLeft") is not None else 9999
 
     keywords_list = tuple(kw.strip() for kw in keywords.split(",") if kw.strip()) if keywords else ()
     params = SearchParams(

@@ -192,9 +192,28 @@ class AgentA:
             self.driver.get(config.KWORK_LOGIN_URL)
             self.human_delay(2, 4)
 
-            # Find login fields
-            email_field = self.driver.find_element(By.NAME, "login")
-            password_field = self.driver.find_element(By.NAME, "password")
+            # Find login fields — try multiple selectors (Kwork changes their markup)
+            email_field = None
+            for _sel in ['[name="login"]', '[name="email"]', 'input[type="email"]', '#login', '#email']:
+                try:
+                    email_field = self.driver.find_element(By.CSS_SELECTOR, _sel)
+                    break
+                except Exception:
+                    continue
+            if not email_field:
+                log_agent_action("Agent A", "❌ [AUTH] Cannot find email/login field on login page", level="ERROR")
+                return False
+
+            password_field = None
+            for _sel in ['[name="password"]', 'input[type="password"]', '#password']:
+                try:
+                    password_field = self.driver.find_element(By.CSS_SELECTOR, _sel)
+                    break
+                except Exception:
+                    continue
+            if not password_field:
+                log_agent_action("Agent A", "❌ [AUTH] Cannot find password field on login page", level="ERROR")
+                return False
             
             email_field.send_keys(config.KWORK_EMAIL)
             self.human_delay(0.5, 1.5)
@@ -202,7 +221,16 @@ class AgentA:
             self.human_delay(0.5, 1.5)
 
             # Find and click submit button
-            submit_btn = self.driver.find_element(By.CSS_SELECTOR, "button.js-login-submit")
+            submit_btn = None
+            for _sel in ['button.js-login-submit', 'button[type="submit"]', 'input[type="submit"]', '.login-btn', '.submit-btn']:
+                try:
+                    submit_btn = self.driver.find_element(By.CSS_SELECTOR, _sel)
+                    break
+                except Exception:
+                    continue
+            if not submit_btn:
+                log_agent_action("Agent A", "❌ [AUTH] Cannot find submit button on login page", level="ERROR")
+                return False
             submit_btn.click()
             
             self.human_delay(3, 5)
@@ -412,8 +440,8 @@ class AgentA:
         log_agent_action("Agent A", f"📋 [SELENIUM] Mode: {'favorites' if favorites_mode else 'keyword'} | Target: Find up to 10 relevant projects")
 
         # Search parameters
-        max_pages = 3  # Maximum pages to search
-        max_relevant_projects = 10  # Search for up to 10 relevant projects
+        max_pages = 3
+        max_relevant_projects = 300  # effectively unlimited
         
         all_projects = []  # All projects found (with full details)
         page = 1
@@ -467,10 +495,19 @@ class AgentA:
 
             # ... [Rest of stability and reading simulation remains similar] ...
 
+            # Diagnostic: confirm URL and page state after navigation
+            actual_url = self.driver.current_url
+            log_agent_action("Agent A", f"🔗 [SELENIUM] Actual URL after nav: {actual_url}")
+            if "login" in actual_url or "auth" in actual_url:
+                log_agent_action("Agent A", "❌ [SELENIUM] Redirected to login page — not authenticated", level="ERROR")
+                break
+
             # Find all project elements on current page
             log_agent_action("Agent A", f"🔍 [SELENIUM] Searching for projects on page {page}...")
             project_cards = self.driver.find_elements(By.CSS_SELECTOR, ".want-card")
             log_agent_action("Agent A", f"✅ [SELENIUM] Found {len(project_cards)} projects on page {page}")
+            if project_cards:
+                log_agent_action("Agent A", f"🃏 [SELENIUM] First card text snippet: {project_cards[0].text[:150].replace(chr(10), ' ')}")
 
             if len(project_cards) == 0:
                 log_agent_action("Agent A", f"⚠️ [SELENIUM] No projects on page {page}, stopping search")
@@ -478,6 +515,8 @@ class AgentA:
 
             # Collect all data from listing cards — no detail page navigation needed
             page_projects = []
+            _skipped_urgency = 0
+            _skipped_err = 0
             proposals_re = re.compile(
                 r'(?:(\d+)\s*(?:предложен\w*|отклик\w*|заяв\w*|ставо?к?|оффер\w*)'
                 r'|(?:предложен\w*|отклик\w*|заяв\w*)\s*[:\-]?\s*(\d+))',
@@ -510,15 +549,36 @@ class AgentA:
                             continue
 
                     if urgency_hours is not None and urgency_hours > params.max_urgency_hours:
+                        _skipped_urgency += 1
                         continue
 
-                    # Title and link
-                    link_element = card.find_element(By.CSS_SELECTOR, "h1 a[href*='/projects/']")
-                    title = link_element.text.strip()
-                    url = link_element.get_attribute("href")
-                    if url and '/projects/' in url:
-                        if '?' in url: url = url.split('?')[0]
-                        if not url.endswith('/view'): url = url.rstrip('/') + '/view'
+                    # Title and link — try multiple selectors
+                    title = None
+                    url = None
+                    for _t_sel in [
+                        "h1 a[href*='/projects/']",
+                        "h2 a[href*='/projects/']",
+                        "h3 a[href*='/projects/']",
+                        "[class*='title'] a[href*='/projects/']",
+                        "[class*='name'] a[href*='/projects/']",
+                        "a[href*='/projects/']",
+                    ]:
+                        try:
+                            _el = card.find_element(By.CSS_SELECTOR, _t_sel)
+                            _t = _el.text.strip()
+                            if _t:
+                                title = _t
+                                url = _el.get_attribute("href")
+                                break
+                        except Exception:
+                            continue
+
+                    if not title or not url:
+                        _skipped_err += 1
+                        continue
+
+                    if '?' in url: url = url.split('?')[0]
+                    if not url.endswith('/view'): url = url.rstrip('/') + '/view'
 
                     card_text = card.text
 
@@ -593,12 +653,13 @@ class AgentA:
                     })
 
                 except Exception:
+                    _skipped_err += 1
                     continue
 
             all_projects.extend(page_projects[:max_relevant_projects - len(all_projects)])
 
             scraped_listing_pages += 1
-            log_agent_action("Agent A", f"📄 [LISTING] Page scraped: {len(page_projects)} cards, total collected: {len(all_projects)}")
+            log_agent_action("Agent A", f"📄 [LISTING] Page scraped: {len(page_projects)} added | urgency_filtered={_skipped_urgency} | other_err={_skipped_err} | total={len(all_projects)}")
 
             # Reverse pagination: go backwards page by page
             if page > 1:

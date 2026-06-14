@@ -50,7 +50,11 @@ export default function ProjectResults({ projects }) {
   const handleExportCsv = () =>
     downloadFile('projects.csv', projectsToCsv(projects), 'text/csv;charset=utf-8')
 
-  if (!projects.length) return null
+  if (!projects.length) return (
+    <div style={{ padding: '32px 16px', color: 'var(--text-dim)', fontSize: '0.82rem', letterSpacing: '0.03em' }}>
+      // no results found — check filters (budget, time, proposals) or try different keywords
+    </div>
+  )
 
   return (
     <div className="results-section">
