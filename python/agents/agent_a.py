@@ -548,29 +548,12 @@ class AgentA:
 
             for card in project_cards:
                 try:
-                    # Urgency: parsed separately so a missing element never skips the whole card.
-                    # urgency_hours=None means "unknown" — card is included (no time data to filter on).
-                    urgency_text = ""
-                    urgency_hours = None
-                    for u_sel in [
-                        ".want-card__informers-row span.mr8",
-                        ".want-card__informers-row span",
-                        "[class*='urgency']",
-                        "[class*='time']",
-                    ]:
-                        try:
-                            uel = card.find_element(By.CSS_SELECTOR, u_sel)
-                            t = uel.text.strip()
-                            if 'Осталось' in t or 'осталось' in t:
-                                urgency_text = t
-                                parsed = self.parse_urgency(t)
-                                if parsed < 999.0:
-                                    urgency_hours = parsed
-                                break
-                        except Exception:
-                            continue
+                    # Urgency check — matches original working logic from 81b8c6a
+                    urgency_element = card.find_element(By.CSS_SELECTOR, ".want-card__informers-row span.mr8")
+                    urgency_text = urgency_element.text.strip()
+                    urgency_hours = self.parse_urgency(urgency_text)
 
-                    if urgency_hours is not None and urgency_hours > params.max_urgency_hours:
+                    if urgency_hours > params.max_urgency_hours:
                         _skipped_urgency += 1
                         continue
 
