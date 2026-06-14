@@ -256,8 +256,9 @@ class AgentA:
 
             # Submit — try multiple selectors, fallback to Enter key
             submitted = False
-            for sel in ['button[type="submit"]', 'button.js-login-submit', 'button.signin__btn',
-                        '[class*="login"] button[type="submit"]', 'form button', 'input[type="submit"]']:
+            for sel in ['button.auth-form__button', 'button.kw-button--green',
+                        'button[type="submit"]', 'button.js-login-submit', 'button.signin__btn',
+                        '[class*="auth-form"] button', 'form button', 'input[type="submit"]']:
                 els = self.driver.find_elements(By.CSS_SELECTOR, sel)
                 if els:
                     els[0].click()
@@ -497,8 +498,14 @@ class AgentA:
                 # plain HTML keyword search — public, no auth needed
                 search_url = f"{config.KWORK_PROJECTS_URL}?keyword={keywords_encoded}&page={page}"
             else:
-                # personal favourites — requires auth (cookies injected via login())
-                search_url = f"{config.KWORK_PROJECTS_URL}?type=favourite&page={page}"
+                # personal favourites — AJAX mode (a=1), requires auth
+                # kworks-filters[]=0,1 = task types; prices-filters[]=3,4 = 10k-30k and 30k+
+                search_url = (
+                    f"{config.KWORK_PROJECTS_URL}?type=favourite&a=1"
+                    f"&kworks-filters[]=0&kworks-filters[]=1"
+                    f"&prices-filters[]=3&prices-filters[]=4"
+                    f"&page={page}"
+                )
             if budget_params:
                 search_url += f"&{budget_params}"
                 
