@@ -6,12 +6,7 @@ import os
 from datetime import datetime
 from typing import List, Dict, Any
 import aiohttp
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium_stealth import stealth
-from fake_useragent import UserAgent
+import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -38,141 +33,47 @@ class AgentA:
         self.session_steps: List[Dict[str, Any]] = []
 
     def setup_driver(self):
-        """Setup stealth browser"""
-        log_agent_action("Agent A", "🔧 [SELENIUM] Starting browser setup...")
+        """Setup undetected-chromedriver browser"""
+        log_agent_action("Agent A", "🔧 [SELENIUM] Starting browser setup (undetected-chromedriver)...")
 
         if config.MODE == "demo":
-            # In demo mode, skip browser setup entirely
             log_agent_action("Agent A", "🔧 [SELENIUM] Demo mode: skipping browser setup")
             self.driver = None
             return
 
-        log_agent_action("Agent A", "🔧 [SELENIUM] Creating Chrome options...")
-        options = Options()
-
-        # Basic options
-        log_agent_action("Agent A", "🔧 [SELENIUM] Configuring Chrome options (no-sandbox, disable-automation)...")
+        options = uc.ChromeOptions()
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        options.add_experimental_option('useAutomationExtension', False)
-
-        # Random User-Agent
-        log_agent_action("Agent A", "🔧 [SELENIUM] Generating random User-Agent...")
-        ua = UserAgent()
-        user_agent = ua.random
-        options.add_argument(f"--user-agent={user_agent}")
-        log_agent_action("Agent A", f"🔧 [SELENIUM] User-Agent: {user_agent[:50]}...")
-
-        # Disable WebRTC
-        log_agent_action("Agent A", "🔧 [SELENIUM] Disabling WebRTC and security features...")
-        options.add_argument("--disable-web-security")
-        options.add_argument("--disable-features=VizDisplayCompositor")
-
-        # Headless mode for server deployment (Render/Linux)
-        # Always use headless on server to avoid display issues
-        log_agent_action("Agent A", "🔧 [SELENIUM] Configuring headless mode for server deployment...")
-        options.add_argument("--headless=new")  # Use new headless mode
-        options.add_argument("--disable-gpu")  # Disable GPU acceleration
-        options.add_argument("--disable-software-rasterizer")
-        options.add_argument("--disable-extensions")
-        options.add_argument("--disable-background-timer-throttling")
-        options.add_argument("--disable-backgrounding-occluded-windows")
-        options.add_argument("--disable-renderer-backgrounding")
-        options.add_argument("--disable-features=TranslateUI")
-        options.add_argument("--disable-ipc-flooding-protection")
-        options.add_argument("--window-size=1920,1080")  # Set window size
-        options.add_argument("--start-maximized")
-        # Additional Linux-specific arguments
-        options.add_argument("--disable-setuid-sandbox")
-        options.add_argument("--disable-seccomp-filter-sandbox")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--window-size=1920,1080")
+        options.add_argument("--mute-audio")
         options.add_argument("--disable-background-networking")
         options.add_argument("--disable-default-apps")
-        options.add_argument("--disable-sync")
-        options.add_argument("--metrics-recording-only")
-        options.add_argument("--mute-audio")
         options.add_argument("--no-first-run")
-        options.add_argument("--safebrowsing-disable-auto-update")
-        options.add_argument("--disable-component-update")
-        
-        # Set binary location if CHROME_BIN env var is set (for Render)
+
+        # Chrome binary (Render provides GOOGLE_CHROME_BIN)
         chrome_bin = os.getenv("CHROME_BIN") or os.getenv("GOOGLE_CHROME_BIN")
-        if chrome_bin:
-            options.binary_location = chrome_bin
-            log_agent_action("Agent A", f"🔧 [SELENIUM] Using Chrome binary from env: {chrome_bin}")
-        
-        log_agent_action("Agent A", "✅ [SELENIUM] Headless mode configured")
-
-        # Create driver - let Selenium Manager handle it
-        log_agent_action("Agent A", "🔧 [SELENIUM] Initializing Chrome driver...")
-        
-        # Try multiple Chrome binary locations (common on Render/Linux servers)
-        chrome_paths = [
-            os.getenv("CHROME_BIN"),
-            os.getenv("GOOGLE_CHROME_BIN"),
-            "/usr/bin/google-chrome",
-            "/usr/bin/google-chrome-stable",
-            "/usr/bin/chromium",
-            "/usr/bin/chromium-browser",
-            "/snap/bin/chromium",
-        ]
-        
-        # Find available Chrome binary
-        chrome_found = None
-        if options.binary_location:
-            chrome_found = options.binary_location
-        else:
-            for path in chrome_paths:
-                if path and os.path.exists(path):
-                    chrome_found = path
-                    options.binary_location = path
-                    log_agent_action("Agent A", f"🔧 [SELENIUM] Found Chrome at: {path}")
+        if not chrome_bin:
+            for path in ["/usr/bin/google-chrome-stable", "/usr/bin/google-chrome", "/usr/bin/chromium"]:
+                if os.path.exists(path):
+                    chrome_bin = path
                     break
-        
-        if not chrome_found:
-            log_agent_action("Agent A", "⚠️ [SELENIUM] Chrome binary not found in standard locations, Selenium will try to find it")
-        
+        if chrome_bin:
+            log_agent_action("Agent A", f"🔧 [SELENIUM] Chrome binary: {chrome_bin}")
+
+        log_agent_action("Agent A", "🔧 [SELENIUM] Initializing undetected Chrome driver...")
         try:
-            # Selenium 4.15+ has built-in manager
-            self.driver = webdriver.Chrome(options=options)
+            self.driver = uc.Chrome(
+                options=options,
+                browser_executable_path=chrome_bin,
+                headless=True,
+                use_subprocess=False,
+            )
             self.driver.set_page_load_timeout(30)
-            log_agent_action("Agent A", "✅ [SELENIUM] Chrome driver initialized successfully")
+            log_agent_action("Agent A", "✅ [SELENIUM] Browser setup complete")
         except Exception as e:
-            log_agent_action("Agent A", f"⚠️ [SELENIUM] Chrome driver setup failed: {str(e)[:200]}")
-            # Try with explicit service and log level
-            try:
-                log_agent_action("Agent A", "🔧 [SELENIUM] Retrying with explicit service...")
-                service = Service()
-                service.service_args = ['--verbose']  # Enable verbose logging
-                self.driver = webdriver.Chrome(service=service, options=options)
-                self.driver.set_page_load_timeout(30)
-                log_agent_action("Agent A", "✅ [SELENIUM] Chrome driver initialized with service")
-            except Exception as e2:
-                error_msg = str(e2)[:500]  # Limit error message length
-                log_agent_action("Agent A", f"❌ [SELENIUM] Service setup also failed: {error_msg}")
-                log_agent_action("Agent A", "💡 [SELENIUM] Tip: Make sure Chrome is installed on the server", level="WARNING")
-                log_agent_action("Agent A", "💡 [SELENIUM] On Windows, ensure Chrome is in PATH or specify location", level="WARNING")
-                # Log environment variables for debugging
-                log_agent_action("Agent A", f"🔍 [DEBUG] GOOGLE_CHROME_BIN: {os.getenv('GOOGLE_CHROME_BIN')}", level="DEBUG")
-                log_agent_action("Agent A", f"🔍 [DEBUG] Current PATH: {os.getenv('PATH')[:100]}...", level="DEBUG")
-                raise Exception(f"Could not setup Chrome driver: {error_msg}")
-
-        # Apply stealth
-        log_agent_action("Agent A", "🔧 [SELENIUM] Applying stealth configuration...")
-        try:
-            stealth(self.driver,
-                    languages=["en-US", "en"],
-                    vendor="Google Inc.",
-                    platform="Win32",
-                    webgl_vendor="Intel Inc.",
-                    renderer="Intel Iris OpenGL Engine",
-                    fix_hairline=True)
-            log_agent_action("Agent A", "✅ [SELENIUM] Stealth configuration applied")
-        except Exception as e:
-            log_agent_action("Agent A", f"⚠️ [SELENIUM] Stealth setup failed: {e}")
-
-        log_agent_action("Agent A", "✅ [SELENIUM] Browser setup complete")
+            log_agent_action("Agent A", f"❌ [SELENIUM] Driver setup failed: {str(e)[:300]}", level="ERROR")
+            raise
 
     def login(self):
         """Login via Selenium on kwork.ru/login dedicated page."""
