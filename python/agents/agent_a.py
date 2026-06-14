@@ -533,26 +533,33 @@ class AgentA:
                         except Exception:
                             pass
 
-                    # Proposals: try card sub-elements first, then regex on card text
+                    # Proposals: only look at informers-row spans that are NOT the urgency span
                     proposals = None
-                    for sel in ["[class*='count']", "[class*='responses']", "[class*='offers']", "[class*='informer']"]:
-                        try:
-                            for el in card.find_elements(By.CSS_SELECTOR, sel):
-                                t = el.text.strip()
+                    try:
+                        informer_spans = card.find_elements(By.CSS_SELECTOR, ".want-card__informers-row span")
+                        for span in informer_spans:
+                            t = span.text.strip()
+                            if not t or t == urgency_text:
+                                continue
+                            if any(kw in t.lower() for kw in ('предложен', 'отклик', 'заяв', 'оффер', 'ставк')):
                                 m = re.search(r'\d+', t)
                                 if m:
                                     proposals = int(m.group(0))
                                     break
-                            if proposals is not None:
-                                break
-                        except Exception:
-                            pass
+                    except Exception:
+                        pass
                     if proposals is None:
                         pm = proposals_re.search(card_text)
                         if pm:
                             proposals = int(pm.group(1) if pm.group(1) is not None else pm.group(2))
 
-                    log_agent_action("Agent A", f"📋 [LISTING] {title[:45]} | budget={budget} | proposals={proposals}")
+                    # Hired count (client reputation): "Нанял X" in card text
+                    hired = None
+                    hm = re.search(r'[Нн]анял[:\s]*(\d+)|(\d+)\s+[Нн]аним', card_text)
+                    if hm:
+                        hired = int(hm.group(1) if hm.group(1) is not None else hm.group(2))
+
+                    log_agent_action("Agent A", f"📋 [LISTING] {title[:45]} | budget={budget} | proposals={proposals} | hired={hired}")
 
                     page_projects.append({
                         "id": url.split('/')[-2] if '/' in url else "unknown",
@@ -563,6 +570,7 @@ class AgentA:
                         "budget": budget,
                         "description": description,
                         "proposals": proposals,
+                        "hired": hired,
                         "page": page,
                         "found_at": datetime.now().isoformat(),
                     })

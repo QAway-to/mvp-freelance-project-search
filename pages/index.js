@@ -1,7 +1,6 @@
 import Head from 'next/head'
 import { useState } from 'react'
 import ProjectSearchForm from '../src/components/ProjectSearchForm'
-import ProjectResults from '../src/components/ProjectResults'
 import LogMonitor from '../src/components/LogMonitor'
 import SearchHistory from '../src/components/SearchHistory'
 import { useLocalStorage } from '../src/hooks/useLocalStorage'
@@ -103,6 +102,7 @@ export default function Home() {
             onParseUrl={handleParseUrl}
             isLoading={isLoading}
             status={status}
+            projects={projects}
           />
           {error && (
             <div className="alert alert-error">// {error}</div>
@@ -110,8 +110,6 @@ export default function Home() {
         </div>
 
         <LogMonitor isActive={isLoading} />
-
-        <ProjectResults projects={projects} />
 
         <SearchHistory
           history={searchHistory}

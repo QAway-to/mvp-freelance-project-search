@@ -467,6 +467,32 @@ a {
   background: var(--surface);
 }
 
+/* ── RESPONSES TAB ── */
+.responses-collecting {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 32px 16px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+.responses-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--muted);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 /* ── SEARCH HISTORY ── */
 .history-section {
   margin-top: 20px;

@@ -1,17 +1,23 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import SearchTab from './SearchTab'
 import UrlTab from './UrlTab'
+import ProjectResults from './ProjectResults'
 
 const STATUS_MAP = {
-  waiting: { cls: 'dot-idle', label: 'idle' },
+  waiting: { cls: 'dot-idle',    label: 'idle' },
   running: { cls: 'dot-running', label: 'searching' },
   success: { cls: 'dot-success', label: 'done' },
   error:   { cls: 'dot-error',   label: 'error' },
 }
 
-export default function ProjectSearchForm({ onSearch, onParseUrl, isLoading, status }) {
+export default function ProjectSearchForm({ onSearch, onParseUrl, isLoading, status, projects = [] }) {
   const [activeTab, setActiveTab] = useState('search')
   const dot = STATUS_MAP[status] || STATUS_MAP.waiting
+
+  // Auto-switch to responses tab the moment search starts
+  useEffect(() => {
+    if (isLoading) setActiveTab('responses')
+  }, [isLoading])
 
   return (
     <div>
@@ -20,6 +26,7 @@ export default function ProjectSearchForm({ onSearch, onParseUrl, isLoading, sta
           type="button"
           className={`tab ${activeTab === 'search' ? 'tab-active' : ''}`}
           onClick={() => setActiveTab('search')}
+          disabled={isLoading}
         >
           search
         </button>
@@ -27,8 +34,16 @@ export default function ProjectSearchForm({ onSearch, onParseUrl, isLoading, sta
           type="button"
           className={`tab ${activeTab === 'url' ? 'tab-active' : ''}`}
           onClick={() => setActiveTab('url')}
+          disabled={isLoading}
         >
           url
+        </button>
+        <button
+          type="button"
+          className={`tab ${activeTab === 'responses' ? 'tab-active' : ''}`}
+          onClick={() => setActiveTab('responses')}
+        >
+          responses{!isLoading && projects.length > 0 ? ` (${projects.length})` : ''}
         </button>
         <span className="tab-status">
           <span className={`dot ${dot.cls}`} />
@@ -36,10 +51,24 @@ export default function ProjectSearchForm({ onSearch, onParseUrl, isLoading, sta
         </span>
       </div>
 
-      {activeTab === 'search'
-        ? <SearchTab onSearch={onSearch} isLoading={isLoading} />
-        : <UrlTab onParseUrl={onParseUrl} isLoading={isLoading} />
-      }
+      {activeTab === 'search' && (
+        <SearchTab onSearch={onSearch} isLoading={isLoading} />
+      )}
+      {activeTab === 'url' && (
+        <UrlTab onParseUrl={onParseUrl} isLoading={isLoading} />
+      )}
+      {activeTab === 'responses' && (
+        isLoading
+          ? (
+            <div className="responses-collecting">
+              <span className="responses-spinner" />
+              <span className="responses-collecting-text">
+                // wait — collecting responses...
+              </span>
+            </div>
+          )
+          : <ProjectResults projects={projects} />
+      )}
     </div>
   )
 }

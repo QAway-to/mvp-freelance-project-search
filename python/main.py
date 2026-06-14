@@ -193,10 +193,12 @@ async def api_search(request: Request):
     hired_min = int(data["hiredMin"]) if data.get("hiredMin") else None
     proposals_max = int(data["proposalsMax"]) if data.get("proposalsMax") else None
 
+    # None hired = unknown; include those (don't penalise missing data)
     if hired_min is not None:
-        projects = [p for p in projects if p.get("hired", 0) >= hired_min]
+        projects = [p for p in projects if p.get("hired") is None or p.get("hired", 0) >= hired_min]
+    # None proposals = unknown; include those
     if proposals_max is not None:
-        projects = [p for p in projects if (p.get("proposals") or 0) <= proposals_max]
+        projects = [p for p in projects if p.get("proposals") is None or p.get("proposals", 0) <= proposals_max]
 
     log_agent_action("API", f"[SEARCH] responding with {len(projects)} projects, total_time={time.time()-t0:.1f}s")
     return {"success": True, "data": projects, "meta": {"total": len(projects), "took_ms": round((time.time()-t0)*1000)}, "error": None}
