@@ -193,50 +193,53 @@ class AgentA:
             actual_login_url = self.driver.current_url
             log_agent_action("Agent A", f"🔐 [AUTH] Login page URL: {actual_login_url}")
 
-            # Wait up to 15s for the login field to appear (page is JS-rendered)
-            email_field = None
-            for _sel in ['[name="login"]', '[name="email"]', 'input[type="email"]', '#login', '#email']:
-                try:
-                    email_field = WebDriverWait(self.driver, 15).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, _sel))
-                    )
-                    log_agent_action("Agent A", f"✅ [AUTH] Found login field via: {_sel}")
-                    break
-                except Exception:
-                    continue
-            if not email_field:
-                snippet = self.driver.page_source[:300].replace('\n', ' ')
-                log_agent_action("Agent A", f"❌ [AUTH] Cannot find email/login field. Page snippet: {snippet}", level="ERROR")
+            # Wait 5s for initial render then check via JS what's actually in DOM
+            self.human_delay(5, 6)
+            js_check = self.driver.execute_script("""
+                var inputs = Array.from(document.querySelectorAll('input'));
+                return inputs.map(function(i){ return i.outerHTML.substring(0,120); });
+            """)
+            log_agent_action("Agent A", f"🔐 [AUTH] Inputs found on page: {js_check[:5]}")
+
+            # Fill fields via JS — bypasses rendering/visibility issues
+            filled = self.driver.execute_script("""
+                var selectors = ['[name="login"]','[name="email"]','input[type="email"]'];
+                var emailField = null;
+                for (var i=0; i<selectors.length; i++) {
+                    emailField = document.querySelector(selectors[i]);
+                    if (emailField) break;
+                }
+                var passField = document.querySelector('[name="password"]') ||
+                                document.querySelector('input[type="password"]');
+                if (!emailField || !passField) return false;
+                var nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                    window.HTMLInputElement.prototype, 'value').set;
+                nativeInputValueSetter.call(emailField, arguments[0]);
+                emailField.dispatchEvent(new Event('input', {bubbles:true}));
+                nativeInputValueSetter.call(passField, arguments[1]);
+                passField.dispatchEvent(new Event('input', {bubbles:true}));
+                return true;
+            """, config.KWORK_EMAIL, config.KWORK_PASSWORD)
+
+            if not filled:
+                snippet = self.driver.page_source[300:800].replace('\n', ' ')
+                log_agent_action("Agent A", f"❌ [AUTH] JS fill failed. Page mid-snippet: {snippet}", level="ERROR")
                 return False
 
-            password_field = None
-            for _sel in ['[name="password"]', 'input[type="password"]', '#password']:
-                try:
-                    password_field = self.driver.find_element(By.CSS_SELECTOR, _sel)
-                    break
-                except Exception:
-                    continue
-            if not password_field:
-                log_agent_action("Agent A", "❌ [AUTH] Cannot find password field on login page", level="ERROR")
-                return False
-            
-            email_field.send_keys(config.KWORK_EMAIL)
-            self.human_delay(0.5, 1.5)
-            password_field.send_keys(config.KWORK_PASSWORD)
-            self.human_delay(0.5, 1.5)
+            log_agent_action("Agent A", "✅ [AUTH] Fields filled via JS")
+            self.human_delay(0.5, 1.0)
 
-            # Find and click submit button
-            submit_btn = None
-            for _sel in ['button.js-login-submit', 'button[type="submit"]', 'input[type="submit"]', '.login-btn', '.submit-btn']:
-                try:
-                    submit_btn = self.driver.find_element(By.CSS_SELECTOR, _sel)
-                    break
-                except Exception:
-                    continue
-            if not submit_btn:
-                log_agent_action("Agent A", "❌ [AUTH] Cannot find submit button on login page", level="ERROR")
+            # Submit via JS click on submit button
+            submitted = self.driver.execute_script("""
+                var btn = document.querySelector('button.js-login-submit') ||
+                          document.querySelector('button[type="submit"]') ||
+                          document.querySelector('input[type="submit"]');
+                if (btn) { btn.click(); return true; }
+                return false;
+            """)
+            if not submitted:
+                log_agent_action("Agent A", "❌ [AUTH] Cannot find/click submit button", level="ERROR")
                 return False
-            submit_btn.click()
             
             self.human_delay(3, 5)
 
