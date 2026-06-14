@@ -175,7 +175,7 @@ class AgentA:
         log_agent_action("Agent A", "✅ [SELENIUM] Browser setup complete")
 
     def login(self):
-        """Log in to Kwork"""
+        """Login via HTTP requests, then inject session cookies into Selenium driver."""
         if self.logged_in:
             return True
 
@@ -186,59 +186,86 @@ class AgentA:
             log_agent_action("Agent A", "⚠️ [AUTH] Credentials missing, skipping login", level="WARNING")
             return False
 
-        log_agent_action("Agent A", f"🔐 [AUTH] Attempting login to Kwork as {config.KWORK_EMAIL}...")
-        
+        log_agent_action("Agent A", f"🔐 [AUTH] Logging in as {config.KWORK_EMAIL} via HTTP session...")
+
+        import requests as _requests
+
+        http = _requests.Session()
+        http.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+            "Accept-Language": "ru-RU,ru;q=0.9",
+            "Referer": config.KWORK_BASE_URL,
+        })
+
+        # Step 1: load homepage to get CSRF token + initial cookies
         try:
-            # Navigate to homepage (not /login) — modal form only renders from there
-            self.driver.get(config.KWORK_BASE_URL)
-            self.human_delay(3, 4)
+            resp = http.get(config.KWORK_BASE_URL, timeout=15)
+            csrf = re.search(r'<meta\s+name="csrf-token"\s+content="([^"]+)"', resp.text)
+            if not csrf:
+                csrf = re.search(r'"_token"\s*:\s*"([^"]+)"', resp.text)
+            if not csrf:
+                csrf = re.search(r'<input[^>]+name="_token"[^>]+value="([^"]+)"', resp.text)
+            csrf_token = csrf.group(1) if csrf else None
+            log_agent_action("Agent A", f"🔐 [AUTH] CSRF token: {'found' if csrf_token else 'not found'}")
+        except Exception as e:
+            log_agent_action("Agent A", f"❌ [AUTH] Failed to load homepage: {e}", level="ERROR")
+            return False
 
-            # Open login modal via header button
-            self.driver.execute_script("""
-                var btn = document.querySelector('.header__login') ||
-                          document.querySelector('.login-js') ||
-                          document.querySelector('[class*="header__login"]');
-                if (btn) btn.click();
-            """)
-            self.human_delay(2, 3)
+        # Step 2: POST login
+        try:
+            payload = {"login": config.KWORK_EMAIL, "password": config.KWORK_PASSWORD}
+            if csrf_token:
+                payload["_token"] = csrf_token
 
-            # Fill form via JS (modal is now open)
-            filled = self.driver.execute_script("""
-                var login = document.querySelector('[name="login"]');
-                var pass  = document.querySelector('[name="password"]');
-                if (!login || !pass) return false;
-                var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;
-                setter.call(login, arguments[0]);
-                login.dispatchEvent(new Event('input', {bubbles:true}));
-                setter.call(pass, arguments[1]);
-                pass.dispatchEvent(new Event('input', {bubbles:true}));
-                return true;
-            """, config.KWORK_EMAIL, config.KWORK_PASSWORD)
+            resp = http.post(
+                config.KWORK_LOGIN_URL,
+                data=payload,
+                headers={"Referer": config.KWORK_LOGIN_URL, "X-Requested-With": "XMLHttpRequest"},
+                timeout=15,
+                allow_redirects=True,
+            )
+            log_agent_action("Agent A", f"🔐 [AUTH] Login POST: status={resp.status_code} url={resp.url}")
 
-            if not filled:
-                log_agent_action("Agent A", "❌ [AUTH] Login modal fields not found after header click", level="ERROR")
-                return False
-
-            self.human_delay(0.5, 1.0)
-            self.driver.execute_script("""
-                var btn = document.querySelector('button.js-login-submit') ||
-                          document.querySelector('.login-form button[type=submit]');
-                if (btn) btn.click();
-            """)
-            
-            self.human_delay(3, 5)
-
-            # Check if login success (no longer on login page or see user icon)
-            if "login" not in self.driver.current_url.lower():
-                log_agent_action("Agent A", "✅ [AUTH] Successfully logged in to Kwork")
-                self.logged_in = True
-                return True
-            else:
-                log_agent_action("Agent A", "❌ [AUTH] Login failed (still on login page)", level="ERROR")
-                return False
+            # Kwork returns JSON on AJAX login
+            try:
+                body = resp.json()
+                if not body.get("success"):
+                    log_agent_action("Agent A", f"❌ [AUTH] Login rejected: {body}", level="ERROR")
+                    return False
+            except Exception:
+                # Non-JSON: check URL redirect
+                if "login" in resp.url and "projects" not in resp.url:
+                    log_agent_action("Agent A", f"❌ [AUTH] Still on login page after POST", level="ERROR")
+                    return False
 
         except Exception as e:
-            log_agent_action("Agent A", f"❌ [AUTH] Login error: {str(e)}", level="ERROR")
+            log_agent_action("Agent A", f"❌ [AUTH] Login POST error: {e}", level="ERROR")
+            return False
+
+        # Step 3: inject cookies into Selenium (browser must be on same domain first)
+        try:
+            self.driver.get(config.KWORK_BASE_URL)
+            self.human_delay(1, 2)
+
+            injected = 0
+            for cookie in http.cookies:
+                try:
+                    self.driver.add_cookie({
+                        "name": cookie.name,
+                        "value": cookie.value,
+                        "domain": ".kwork.ru",
+                        "path": "/",
+                    })
+                    injected += 1
+                except Exception:
+                    pass
+
+            log_agent_action("Agent A", f"✅ [AUTH] Injected {injected} session cookies into browser")
+            self.logged_in = True
+            return True
+
+        except Exception as e:
+            log_agent_action("Agent A", f"❌ [AUTH] Cookie injection failed: {e}", level="ERROR")
             return False
 
     def parse_urgency(self, text: str) -> float:
@@ -446,10 +473,10 @@ class AgentA:
             # Inject budget filters if they exist
             budget_params = "&".join([f"prices-filters[]={f}" for f in params.budget_filters])
             if keywords_encoded:
-                # no &a=1 — AJAX mode requires auth; plain HTML search is public
+                # plain HTML keyword search — public, no auth needed
                 search_url = f"{config.KWORK_PROJECTS_URL}?keyword={keywords_encoded}&page={page}"
             else:
-                # favourites: plain HTML, public access
+                # personal favourites — requires auth (cookies injected via login())
                 search_url = f"{config.KWORK_PROJECTS_URL}?type=favourite&page={page}"
             if budget_params:
                 search_url += f"&{budget_params}"
@@ -492,8 +519,8 @@ class AgentA:
             # Diagnostic: confirm URL and page state after navigation
             actual_url = self.driver.current_url
             log_agent_action("Agent A", f"🔗 [SELENIUM] Actual URL after nav: {actual_url}")
-            if "login" in actual_url or "auth" in actual_url:
-                log_agent_action("Agent A", "❌ [SELENIUM] Redirected to login page — not authenticated", level="ERROR")
+            if "login" in actual_url or "auth" in actual_url or "not_access" in actual_url:
+                log_agent_action("Agent A", f"❌ [SELENIUM] Auth redirect detected ({actual_url}) — session invalid", level="ERROR")
                 break
 
             # Find all project elements on current page
