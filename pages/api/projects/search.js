@@ -1,18 +1,12 @@
 const { searchProjects } = require('../../../lib/pythonClient')
 const { normalizeProject } = require('../../../lib/normalizers')
 
-function parseBudgetAmount(budgetStr) {
-  if (!budgetStr) return null
-  const digits = budgetStr.replace(/\D/g, '')
-  return digits ? parseInt(digits, 10) : null
-}
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
-  const { keywords, timeLeft, budgetMin, hiredMin, proposalsMax } = req.body
+  const { keywords, timeLeft, hiredMin, proposalsMax } = req.body
 
   let result
   try {
@@ -33,14 +27,6 @@ export default async function handler(req, res) {
   }
 
   let projects = (result.data || []).map(normalizeProject)
-
-  if (budgetMin) {
-    const min = parseInt(budgetMin, 10)
-    projects = projects.filter(p => {
-      const amount = parseBudgetAmount(p.budget)
-      return amount === null || amount >= min
-    })
-  }
 
   return res.status(200).json({
     status: 'success',
