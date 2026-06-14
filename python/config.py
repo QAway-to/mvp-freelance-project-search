@@ -48,7 +48,8 @@ class Config:
     N8N_WEBHOOK_URL: Optional[str] = os.getenv('N8N_WEBHOOK_URL')
     
     # Gemini AI (for semantic evaluation)
-    GEMINI_API_KEY: Optional[str] = os.getenv('GEMINI_API_KEY')
+    # Also checks 'gpt-oss-120b' — the Render env var name the user configured
+    GEMINI_API_KEY: Optional[str] = os.getenv('GEMINI_API_KEY') or os.getenv('gpt-oss-120b')
     SEMANTIC_SIMILARITY_THRESHOLD: float = float(os.getenv('SEMANTIC_SIMILARITY_THRESHOLD', '0.50'))  # Lowered from 0.75 to 0.50 for better matching
 
     # Search limits

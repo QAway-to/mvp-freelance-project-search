@@ -1,21 +1,16 @@
 import { useState, useEffect, useRef } from 'react'
 import { useLocalStorage } from '../hooks/useLocalStorage'
-import { KWORK_CATEGORIES } from '../../lib/kworkCategories'
-
-const DEFAULT_CATEGORY = 41
 
 const filterCyrillic = (text) => text.replace(/[^а-яА-ЯёЁ\s,.-]/g, '')
 
 export default function SearchTab({ onSearch, isLoading }) {
   const [query, setQuery] = useState('')
-  const [category, setCategory] = useState(DEFAULT_CATEGORY)
   const [timeLeft, setTimeLeft] = useState('72')
   const [budgetMin, setBudgetMin] = useState('20000')
   const [hiredMin, setHiredMin] = useState('')
   const [proposalsMax, setProposalsMax] = useState('')
   const [error, setError] = useState(null)
   const [history, setHistory] = useLocalStorage('recent_searches', [])
-  const [favCats, setFavCats] = useLocalStorage('fav_categories', [])
   const lastSearchedRef = useRef('')
   const onSearchRef = useRef(onSearch)
 
@@ -23,7 +18,6 @@ export default function SearchTab({ onSearch, isLoading }) {
 
   const buildParams = (q) => ({
     keywords: q,
-    ...(category !== DEFAULT_CATEGORY ? { category } : {}),
     timeLeft: timeLeft ? parseInt(timeLeft, 10) : null,
     budgetMin: budgetMin ? parseInt(budgetMin, 10) : null,
     hiredMin: hiredMin ? parseInt(hiredMin, 10) : null,
@@ -45,12 +39,6 @@ export default function SearchTab({ onSearch, isLoading }) {
     onSearchRef.current(buildParams(q))
   }
 
-  const toggleFavCat = (id) => {
-    setFavCats(prev =>
-      prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]
-    )
-  }
-
   const handleChipClick = (chip) => {
     setQuery(chip)
     setError(null)
@@ -61,48 +49,6 @@ export default function SearchTab({ onSearch, isLoading }) {
 
   return (
     <form onSubmit={handleSubmit}>
-      <div className="form-group">
-        <label className="form-label">category</label>
-        {favCats.length > 0 && (
-          <div className="fav-cat-chips">
-            {KWORK_CATEGORIES.filter(c => favCats.includes(c.id)).map(cat => (
-              <button
-                key={cat.id}
-                type="button"
-                className={`chip ${category === cat.id ? 'chip-active' : ''}`}
-                onClick={() => setCategory(cat.id)}
-                disabled={isLoading}
-              >
-                ★ {cat.labelRu}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="category-row">
-          <select
-            value={category}
-            onChange={(e) => setCategory(parseInt(e.target.value, 10))}
-            className="form-input category-select"
-            disabled={isLoading}
-          >
-            {KWORK_CATEGORIES.map((cat) => (
-              <option key={cat.id} value={cat.id}>
-                {cat.labelRu}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            className={`btn btn-sm fav-toggle ${favCats.includes(category) ? 'fav-toggle-active' : ''}`}
-            onClick={() => toggleFavCat(category)}
-            disabled={isLoading}
-            title={favCats.includes(category) ? 'Убрать из избранного' : 'Добавить в избранное'}
-          >
-            {favCats.includes(category) ? '★' : '☆'}
-          </button>
-        </div>
-      </div>
-
       <div className="form-group">
         <label className="form-label">
           keywords <span className="form-hint">// кириллица</span>

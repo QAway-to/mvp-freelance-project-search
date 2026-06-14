@@ -408,12 +408,12 @@ class AgentA:
         keywords_str = ','.join(params.keywords_list)
         keywords_encoded = quote_plus(keywords_str) if keywords_str else ""
         log_agent_action("Agent A", f"📋 [SELENIUM] Search keywords: {keywords_str or '(none — filter only)'}")
-        log_agent_action("Agent A", f"📋 [SELENIUM] Target: Find up to 10 relevant projects with proposal button available, output top 5")
+        favorites_mode = not keywords_encoded
+        log_agent_action("Agent A", f"📋 [SELENIUM] Mode: {'favorites' if favorites_mode else 'keyword'} | Target: Find up to 10 relevant projects")
 
         # Search parameters
         max_pages = 3  # Maximum pages to search
         max_relevant_projects = 10  # Search for up to 10 relevant projects
-        output_limit = 5  # Output top 5 most relevant
         
         all_projects = []  # All projects found (with full details)
         page = 1
@@ -425,9 +425,10 @@ class AgentA:
             # Inject budget filters if they exist
             budget_params = "&".join([f"prices-filters[]={f}" for f in params.budget_filters])
             if keywords_encoded:
-                search_url = f"{config.KWORK_PROJECTS_URL}?keyword={keywords_encoded}&page={page}&a=1"
+                base_url = f"{config.KWORK_PROJECTS_URL}?keyword={keywords_encoded}"
             else:
-                search_url = f"{config.KWORK_PROJECTS_URL}?page={page}&a=1"
+                base_url = f"{config.KWORK_PROJECTS_URL}?type=favourite"
+            search_url = f"{base_url}&page={page}&a=1"
             if budget_params:
                 search_url += f"&{budget_params}"
                 
@@ -437,26 +438,22 @@ class AgentA:
                 self.driver.get(search_url)
                 log_agent_action("Agent A", f"✅ [SELENIUM] Page {page} loaded successfully")
                 
-                # Logic for reverse pagination (on first page load, only once)
-                if page == 1 and not reverse_page_set:
+                # Reverse pagination: keyword mode only — favorites list is short, start from page 1
+                if page == 1 and not reverse_page_set and keywords_encoded:
                     try:
                         pagination_items = self.driver.find_elements(By.CSS_SELECTOR, ".pagination__item")
                         if pagination_items:
-                            # Filter only numeric items and find max
                             pages = []
                             for item in pagination_items:
                                 if item.text.isdigit():
                                     pages.append(int(item.text))
-                            
+
                             if pages:
                                 max_p = max(pages)
                                 log_agent_action("Agent A", f"📑 [SELENIUM] Found {max_p} total pages. Switching to last page for reverse search.")
                                 page = max_p
                                 reverse_page_set = True
-                                if keywords_encoded:
-                                    last_page_url = f"{config.KWORK_PROJECTS_URL}?keyword={keywords_encoded}&page={max_p}&a=1"
-                                else:
-                                    last_page_url = f"{config.KWORK_PROJECTS_URL}?page={max_p}&a=1"
+                                last_page_url = f"{config.KWORK_PROJECTS_URL}?keyword={keywords_encoded}&page={max_p}&a=1"
                                 if budget_params:
                                     last_page_url += f"&{budget_params}"
                                 self.driver.get(last_page_url)
@@ -632,11 +629,8 @@ class AgentA:
             # Sort by semantic score (highest first), then by total score
             evaluated_projects.sort(key=lambda x: (x.get("semantic_score", 0.0), x.get("evaluation", {}).get("score", 0.0)), reverse=True)
             
-            # Return top N most relevant projects
-            top_projects = evaluated_projects[:output_limit]
-            log_agent_action("Agent A", f"📊 [SEMANTIC] Selected top {len(top_projects)} most relevant projects out of {len(evaluated_projects)}")
-            
-            return top_projects
+            log_agent_action("Agent A", f"📊 [SEMANTIC] Returning {len(evaluated_projects)} projects sorted by relevance")
+            return evaluated_projects
         else:
             log_agent_action("Agent A", f"⚠️ [SELENIUM] No projects found with proposal button available")
             return []
