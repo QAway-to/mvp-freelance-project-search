@@ -189,21 +189,42 @@ class AgentA:
         log_agent_action("Agent A", f"🔐 [AUTH] Attempting login to Kwork as {config.KWORK_EMAIL}...")
         
         try:
-            self.driver.get(config.KWORK_LOGIN_URL)
-            self.human_delay(2, 4)
+            # Navigate to homepage (not /login) — modal form only renders from there
+            self.driver.get(config.KWORK_BASE_URL)
+            self.human_delay(3, 4)
 
-            # Find login fields
-            email_field = self.driver.find_element(By.NAME, "login")
-            password_field = self.driver.find_element(By.NAME, "password")
+            # Open login modal via header button
+            self.driver.execute_script("""
+                var btn = document.querySelector('.header__login') ||
+                          document.querySelector('.login-js') ||
+                          document.querySelector('[class*="header__login"]');
+                if (btn) btn.click();
+            """)
+            self.human_delay(2, 3)
 
-            email_field.send_keys(config.KWORK_EMAIL)
-            self.human_delay(0.5, 1.5)
-            password_field.send_keys(config.KWORK_PASSWORD)
-            self.human_delay(0.5, 1.5)
+            # Fill form via JS (modal is now open)
+            filled = self.driver.execute_script("""
+                var login = document.querySelector('[name="login"]');
+                var pass  = document.querySelector('[name="password"]');
+                if (!login || !pass) return false;
+                var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;
+                setter.call(login, arguments[0]);
+                login.dispatchEvent(new Event('input', {bubbles:true}));
+                setter.call(pass, arguments[1]);
+                pass.dispatchEvent(new Event('input', {bubbles:true}));
+                return true;
+            """, config.KWORK_EMAIL, config.KWORK_PASSWORD)
 
-            # Find and click submit button
-            submit_btn = self.driver.find_element(By.CSS_SELECTOR, "button.js-login-submit")
-            submit_btn.click()
+            if not filled:
+                log_agent_action("Agent A", "❌ [AUTH] Login modal fields not found after header click", level="ERROR")
+                return False
+
+            self.human_delay(0.5, 1.0)
+            self.driver.execute_script("""
+                var btn = document.querySelector('button.js-login-submit') ||
+                          document.querySelector('.login-form button[type=submit]');
+                if (btn) btn.click();
+            """)
             
             self.human_delay(3, 5)
 
