@@ -225,30 +225,39 @@ class AgentA:
                 return False
 
             from selenium.webdriver.common.action_chains import ActionChains
+            from selenium.webdriver.common.keys import Keys
 
-            def fill_field(field, value):
+            def fill_field(field, value, label):
                 """Scroll into view, click, type — JS fallback if not interactable."""
                 try:
                     self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", field)
                     self.human_delay(0.2, 0.4)
                     ActionChains(self.driver).move_to_element(field).click().send_keys(value).perform()
-                except Exception:
-                    # JS fallback: set value directly and fire input event
+                    log_agent_action("Agent A", f"🔐 [AUTH] Filled {label} via ActionChains")
+                except Exception as fe:
+                    log_agent_action("Agent A", f"🔐 [AUTH] ActionChains failed for {label}: {fe} — using JS", level="WARNING")
                     self.driver.execute_script(
-                        "arguments[0].value = arguments[1];"
+                        "var s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;"
+                        "s.call(arguments[0],arguments[1]);"
                         "arguments[0].dispatchEvent(new Event('input',{bubbles:true}));"
                         "arguments[0].dispatchEvent(new Event('change',{bubbles:true}));",
                         field, value
                     )
+                    log_agent_action("Agent A", f"🔐 [AUTH] Filled {label} via JS native setter")
 
-            fill_field(login_field, config.KWORK_EMAIL)
-            self.human_delay(0.4, 0.8)
-            fill_field(pass_field, config.KWORK_PASSWORD)
-            self.human_delay(0.4, 0.8)
+            fill_field(login_field, config.KWORK_EMAIL, "login")
+            self.human_delay(0.5, 1.0)
+            fill_field(pass_field, config.KWORK_PASSWORD, "password")
+            self.human_delay(0.5, 1.0)
 
-            # Submit
+            # Log all buttons for diagnostics
+            all_btns = self.driver.find_elements(By.CSS_SELECTOR, "button, input[type='submit']")
+            log_agent_action("Agent A", f"🔐 [AUTH] Buttons on page: {[(b.get_attribute('type'), b.get_attribute('class'), b.text[:30]) for b in all_btns]}")
+
+            # Submit — try multiple selectors, fallback to Enter key
             submitted = False
-            for sel in ['button[type="submit"]', 'button.js-login-submit', '.login-form button', 'input[type="submit"]']:
+            for sel in ['button[type="submit"]', 'button.js-login-submit', 'button.signin__btn',
+                        '[class*="login"] button[type="submit"]', 'form button', 'input[type="submit"]']:
                 els = self.driver.find_elements(By.CSS_SELECTOR, sel)
                 if els:
                     els[0].click()
@@ -256,8 +265,9 @@ class AgentA:
                     log_agent_action("Agent A", f"🔐 [AUTH] Clicked submit: {sel}")
                     break
             if not submitted:
-                pass_field.submit()
-                log_agent_action("Agent A", "🔐 [AUTH] Submitted via form.submit()")
+                # Press Enter on password field — most natural and reliable
+                pass_field.send_keys(Keys.RETURN)
+                log_agent_action("Agent A", "🔐 [AUTH] Submitted via Enter key on password field")
 
             self.human_delay(3, 5)
 
