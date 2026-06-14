@@ -446,10 +446,10 @@ class AgentA:
             # Inject budget filters if they exist
             budget_params = "&".join([f"prices-filters[]={f}" for f in params.budget_filters])
             if keywords_encoded:
-                base_url = f"{config.KWORK_PROJECTS_URL}?keyword={keywords_encoded}"
-                search_url = f"{base_url}&page={page}&a=1"
+                # no &a=1 — AJAX mode requires auth; plain HTML search is public
+                search_url = f"{config.KWORK_PROJECTS_URL}?keyword={keywords_encoded}&page={page}"
             else:
-                # favourites: no &a=1 — AJAX mode requires auth, plain HTML works without it
+                # favourites: plain HTML, public access
                 search_url = f"{config.KWORK_PROJECTS_URL}?type=favourite&page={page}"
             if budget_params:
                 search_url += f"&{budget_params}"
@@ -475,7 +475,7 @@ class AgentA:
                                 log_agent_action("Agent A", f"📑 [SELENIUM] Found {max_p} total pages. Switching to last page for reverse search.")
                                 page = max_p
                                 reverse_page_set = True
-                                last_page_url = f"{config.KWORK_PROJECTS_URL}?keyword={keywords_encoded}&page={max_p}&a=1"
+                                last_page_url = f"{config.KWORK_PROJECTS_URL}?keyword={keywords_encoded}&page={max_p}"
                                 if budget_params:
                                     last_page_url += f"&{budget_params}"
                                 self.driver.get(last_page_url)
