@@ -190,18 +190,23 @@ class AgentA:
         
         try:
             self.driver.get(config.KWORK_LOGIN_URL)
-            self.human_delay(2, 4)
+            actual_login_url = self.driver.current_url
+            log_agent_action("Agent A", f"🔐 [AUTH] Login page URL: {actual_login_url}")
 
-            # Find login fields — try multiple selectors (Kwork changes their markup)
+            # Wait up to 15s for the login field to appear (page is JS-rendered)
             email_field = None
             for _sel in ['[name="login"]', '[name="email"]', 'input[type="email"]', '#login', '#email']:
                 try:
-                    email_field = self.driver.find_element(By.CSS_SELECTOR, _sel)
+                    email_field = WebDriverWait(self.driver, 15).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, _sel))
+                    )
+                    log_agent_action("Agent A", f"✅ [AUTH] Found login field via: {_sel}")
                     break
                 except Exception:
                     continue
             if not email_field:
-                log_agent_action("Agent A", "❌ [AUTH] Cannot find email/login field on login page", level="ERROR")
+                snippet = self.driver.page_source[:300].replace('\n', ' ')
+                log_agent_action("Agent A", f"❌ [AUTH] Cannot find email/login field. Page snippet: {snippet}", level="ERROR")
                 return False
 
             password_field = None
