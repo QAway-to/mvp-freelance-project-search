@@ -175,7 +175,7 @@ class AgentA:
         log_agent_action("Agent A", "✅ [SELENIUM] Browser setup complete")
 
     def login(self):
-        """Login via HTTP requests, then inject session cookies into Selenium driver."""
+        """Login via Selenium on kwork.ru/login dedicated page."""
         if self.logged_in:
             return True
 
@@ -186,95 +186,82 @@ class AgentA:
             log_agent_action("Agent A", "⚠️ [AUTH] Credentials missing, skipping login", level="WARNING")
             return False
 
-        log_agent_action("Agent A", f"🔐 [AUTH] Logging in as {config.KWORK_EMAIL} via HTTP session...")
+        log_agent_action("Agent A", f"🔐 [AUTH] Logging in as {config.KWORK_EMAIL} via Selenium /login page...")
 
-        import requests as _requests
-
-        http = _requests.Session()
-        http.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-            "Accept-Language": "ru-RU,ru;q=0.9",
-            "Referer": config.KWORK_BASE_URL,
-        })
-
-        # Step 1: load login page to get CSRF token + initial cookies
         try:
-            resp = http.get(config.KWORK_LOGIN_URL, timeout=15)
-            # Try multiple CSRF token patterns
-            csrf = (
-                re.search(r'<meta\s+name="csrf-token"\s+content="([^"]+)"', resp.text)
-                or re.search(r'<input[^>]+name="_token"[^>]+value="([^"]+)"', resp.text)
-                or re.search(r'<input[^>]+value="([^"]+)"[^>]+name="_token"', resp.text)
-                or re.search(r'"_token"\s*:\s*"([^"]+)"', resp.text)
-                or re.search(r'"csrfToken"\s*:\s*"([^"]+)"', resp.text)
-            )
-            csrf_token = csrf.group(1) if csrf else None
-            log_agent_action("Agent A", f"🔐 [AUTH] CSRF token: {'found (' + csrf_token[:8] + '...)' if csrf_token else 'not found'}")
-            log_agent_action("Agent A", f"🔐 [AUTH] Login page cookies: {[c.name for c in http.cookies]}")
-        except Exception as e:
-            log_agent_action("Agent A", f"❌ [AUTH] Failed to load login page: {e}", level="ERROR")
-            return False
+            self.driver.get(config.KWORK_LOGIN_URL)
+            self.human_delay(2, 3)
 
-        # Step 2: POST login
-        try:
-            payload = {"login": config.KWORK_EMAIL, "password": config.KWORK_PASSWORD}
-            if csrf_token:
-                payload["_token"] = csrf_token
+            actual_url = self.driver.current_url
+            log_agent_action("Agent A", f"🔐 [AUTH] Login page URL: {actual_url}")
 
-            resp = http.post(
-                config.KWORK_LOGIN_URL,
-                data=payload,
-                headers={"Referer": config.KWORK_LOGIN_URL, "X-Requested-With": "XMLHttpRequest"},
-                timeout=15,
-                allow_redirects=True,
-            )
-            log_agent_action("Agent A", f"🔐 [AUTH] Login POST: status={resp.status_code} final_url={resp.url}")
-            # Log first 300 chars of response to diagnose
-            body_preview = resp.text[:300].replace("\n", " ")
-            log_agent_action("Agent A", f"🔐 [AUTH] Response body: {body_preview}")
+            # Log what's on the page
+            page_title = self.driver.title
+            log_agent_action("Agent A", f"🔐 [AUTH] Page title: {page_title}")
 
-            # Kwork may return JSON on AJAX login
-            try:
-                body = resp.json()
-                if not body.get("success"):
-                    log_agent_action("Agent A", f"❌ [AUTH] Login rejected (JSON): {body}", level="ERROR")
-                    return False
-                log_agent_action("Agent A", f"✅ [AUTH] Login success (JSON response)")
-            except Exception:
-                # Non-JSON: successful login redirects away from /login
-                if resp.url.rstrip("/") == config.KWORK_LOGIN_URL.rstrip("/"):
-                    log_agent_action("Agent A", "❌ [AUTH] Still on login page — credentials or CSRF invalid", level="ERROR")
-                    return False
-                log_agent_action("Agent A", f"✅ [AUTH] Login success (redirect to {resp.url})")
+            # Find login/email field
+            login_field = None
+            for sel in ['input[name="login"]', 'input[name="email"]', 'input[type="email"]']:
+                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
+                if els:
+                    login_field = els[0]
+                    log_agent_action("Agent A", f"🔐 [AUTH] Found login field: {sel}")
+                    break
 
-        except Exception as e:
-            log_agent_action("Agent A", f"❌ [AUTH] Login POST error: {e}", level="ERROR")
-            return False
+            # Find password field
+            pass_field = None
+            for sel in ['input[name="password"]', 'input[type="password"]']:
+                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
+                if els:
+                    pass_field = els[0]
+                    log_agent_action("Agent A", f"🔐 [AUTH] Found password field: {sel}")
+                    break
 
-        # Step 3: inject cookies into Selenium (browser must be on same domain first)
-        try:
-            self.driver.get(config.KWORK_BASE_URL)
-            self.human_delay(1, 2)
+            if not login_field or not pass_field:
+                # Log all inputs for diagnostics
+                all_inputs = self.driver.find_elements(By.CSS_SELECTOR, "input")
+                log_agent_action("Agent A", f"🔐 [AUTH] All inputs on page: {[(i.get_attribute('name'), i.get_attribute('type')) for i in all_inputs]}", level="ERROR")
+                log_agent_action("Agent A", "❌ [AUTH] Login/password fields not found on /login page", level="ERROR")
+                return False
 
-            injected = 0
-            for cookie in http.cookies:
-                try:
-                    self.driver.add_cookie({
-                        "name": cookie.name,
-                        "value": cookie.value,
-                        "domain": ".kwork.ru",
-                        "path": "/",
-                    })
-                    injected += 1
-                except Exception:
-                    pass
+            login_field.clear()
+            login_field.send_keys(config.KWORK_EMAIL)
+            self.human_delay(0.3, 0.7)
+            pass_field.clear()
+            pass_field.send_keys(config.KWORK_PASSWORD)
+            self.human_delay(0.3, 0.7)
 
-            log_agent_action("Agent A", f"✅ [AUTH] Injected {injected} session cookies into browser")
-            self.logged_in = True
-            return True
+            # Submit
+            submitted = False
+            for sel in ['button[type="submit"]', 'button.js-login-submit', '.login-form button', 'input[type="submit"]']:
+                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
+                if els:
+                    els[0].click()
+                    submitted = True
+                    log_agent_action("Agent A", f"🔐 [AUTH] Clicked submit: {sel}")
+                    break
+            if not submitted:
+                pass_field.submit()
+                log_agent_action("Agent A", "🔐 [AUTH] Submitted via form.submit()")
+
+            self.human_delay(3, 5)
+
+            final_url = self.driver.current_url
+            log_agent_action("Agent A", f"🔐 [AUTH] Post-login URL: {final_url}")
+
+            if "login" not in final_url:
+                log_agent_action("Agent A", "✅ [AUTH] Login successful — redirected away from /login")
+                self.logged_in = True
+                return True
+            else:
+                log_agent_action("Agent A", "❌ [AUTH] Still on /login — check credentials or captcha", level="ERROR")
+                # Log page source snippet for diagnostics
+                src = self.driver.page_source[:500].replace("\n", " ")
+                log_agent_action("Agent A", f"🔐 [AUTH] Page snippet: {src}")
+                return False
 
         except Exception as e:
-            log_agent_action("Agent A", f"❌ [AUTH] Cookie injection failed: {e}", level="ERROR")
+            log_agent_action("Agent A", f"❌ [AUTH] Login error: {e}", level="ERROR")
             return False
 
     def parse_urgency(self, text: str) -> float:
