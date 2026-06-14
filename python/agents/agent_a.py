@@ -447,9 +447,10 @@ class AgentA:
             budget_params = "&".join([f"prices-filters[]={f}" for f in params.budget_filters])
             if keywords_encoded:
                 base_url = f"{config.KWORK_PROJECTS_URL}?keyword={keywords_encoded}"
+                search_url = f"{base_url}&page={page}&a=1"
             else:
-                base_url = f"{config.KWORK_PROJECTS_URL}?type=favourite"
-            search_url = f"{base_url}&page={page}&a=1"
+                # favourites: no &a=1 — AJAX mode requires auth, plain HTML works without it
+                search_url = f"{config.KWORK_PROJECTS_URL}?type=favourite&page={page}"
             if budget_params:
                 search_url += f"&{budget_params}"
                 
