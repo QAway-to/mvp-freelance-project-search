@@ -197,18 +197,22 @@ class AgentA:
             "Referer": config.KWORK_BASE_URL,
         })
 
-        # Step 1: load homepage to get CSRF token + initial cookies
+        # Step 1: load login page to get CSRF token + initial cookies
         try:
-            resp = http.get(config.KWORK_BASE_URL, timeout=15)
-            csrf = re.search(r'<meta\s+name="csrf-token"\s+content="([^"]+)"', resp.text)
-            if not csrf:
-                csrf = re.search(r'"_token"\s*:\s*"([^"]+)"', resp.text)
-            if not csrf:
-                csrf = re.search(r'<input[^>]+name="_token"[^>]+value="([^"]+)"', resp.text)
+            resp = http.get(config.KWORK_LOGIN_URL, timeout=15)
+            # Try multiple CSRF token patterns
+            csrf = (
+                re.search(r'<meta\s+name="csrf-token"\s+content="([^"]+)"', resp.text)
+                or re.search(r'<input[^>]+name="_token"[^>]+value="([^"]+)"', resp.text)
+                or re.search(r'<input[^>]+value="([^"]+)"[^>]+name="_token"', resp.text)
+                or re.search(r'"_token"\s*:\s*"([^"]+)"', resp.text)
+                or re.search(r'"csrfToken"\s*:\s*"([^"]+)"', resp.text)
+            )
             csrf_token = csrf.group(1) if csrf else None
-            log_agent_action("Agent A", f"🔐 [AUTH] CSRF token: {'found' if csrf_token else 'not found'}")
+            log_agent_action("Agent A", f"🔐 [AUTH] CSRF token: {'found (' + csrf_token[:8] + '...)' if csrf_token else 'not found'}")
+            log_agent_action("Agent A", f"🔐 [AUTH] Login page cookies: {[c.name for c in http.cookies]}")
         except Exception as e:
-            log_agent_action("Agent A", f"❌ [AUTH] Failed to load homepage: {e}", level="ERROR")
+            log_agent_action("Agent A", f"❌ [AUTH] Failed to load login page: {e}", level="ERROR")
             return False
 
         # Step 2: POST login
@@ -224,19 +228,24 @@ class AgentA:
                 timeout=15,
                 allow_redirects=True,
             )
-            log_agent_action("Agent A", f"🔐 [AUTH] Login POST: status={resp.status_code} url={resp.url}")
+            log_agent_action("Agent A", f"🔐 [AUTH] Login POST: status={resp.status_code} final_url={resp.url}")
+            # Log first 300 chars of response to diagnose
+            body_preview = resp.text[:300].replace("\n", " ")
+            log_agent_action("Agent A", f"🔐 [AUTH] Response body: {body_preview}")
 
-            # Kwork returns JSON on AJAX login
+            # Kwork may return JSON on AJAX login
             try:
                 body = resp.json()
                 if not body.get("success"):
-                    log_agent_action("Agent A", f"❌ [AUTH] Login rejected: {body}", level="ERROR")
+                    log_agent_action("Agent A", f"❌ [AUTH] Login rejected (JSON): {body}", level="ERROR")
                     return False
+                log_agent_action("Agent A", f"✅ [AUTH] Login success (JSON response)")
             except Exception:
-                # Non-JSON: check URL redirect
-                if "login" in resp.url and "projects" not in resp.url:
-                    log_agent_action("Agent A", f"❌ [AUTH] Still on login page after POST", level="ERROR")
+                # Non-JSON: successful login redirects away from /login
+                if resp.url.rstrip("/") == config.KWORK_LOGIN_URL.rstrip("/"):
+                    log_agent_action("Agent A", "❌ [AUTH] Still on login page — credentials or CSRF invalid", level="ERROR")
                     return False
+                log_agent_action("Agent A", f"✅ [AUTH] Login success (redirect to {resp.url})")
 
         except Exception as e:
             log_agent_action("Agent A", f"❌ [AUTH] Login POST error: {e}", level="ERROR")
