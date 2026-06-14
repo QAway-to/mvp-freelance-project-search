@@ -28,7 +28,7 @@ class AgentA:
     def __init__(self):
         self.driver = None
         self.logged_in = False
-        self.evaluator = ProjectEvaluator()
+        self._evaluator = None  # lazy: only created when parse_single_url is called
         self.status = "stopped"
         self.last_run_time = None
         self.found_projects: List[Dict[str, Any]] = []
@@ -873,7 +873,9 @@ class AgentA:
                 "timeLeft": time_left,
             }
 
-            score, reasons = self.evaluator.evaluate_project(project)
+            if self._evaluator is None:
+                self._evaluator = ProjectEvaluator()
+            score, reasons = self._evaluator.evaluate_project(project)
             project["evaluation"] = {
                 "score": score,
                 "reasons": reasons,
