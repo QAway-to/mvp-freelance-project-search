@@ -224,12 +224,27 @@ class AgentA:
                 log_agent_action("Agent A", "❌ [AUTH] Login/password fields not found on /login page", level="ERROR")
                 return False
 
-            login_field.clear()
-            login_field.send_keys(config.KWORK_EMAIL)
-            self.human_delay(0.3, 0.7)
-            pass_field.clear()
-            pass_field.send_keys(config.KWORK_PASSWORD)
-            self.human_delay(0.3, 0.7)
+            from selenium.webdriver.common.action_chains import ActionChains
+
+            def fill_field(field, value):
+                """Scroll into view, click, type — JS fallback if not interactable."""
+                try:
+                    self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", field)
+                    self.human_delay(0.2, 0.4)
+                    ActionChains(self.driver).move_to_element(field).click().send_keys(value).perform()
+                except Exception:
+                    # JS fallback: set value directly and fire input event
+                    self.driver.execute_script(
+                        "arguments[0].value = arguments[1];"
+                        "arguments[0].dispatchEvent(new Event('input',{bubbles:true}));"
+                        "arguments[0].dispatchEvent(new Event('change',{bubbles:true}));",
+                        field, value
+                    )
+
+            fill_field(login_field, config.KWORK_EMAIL)
+            self.human_delay(0.4, 0.8)
+            fill_field(pass_field, config.KWORK_PASSWORD)
+            self.human_delay(0.4, 0.8)
 
             # Submit
             submitted = False
