@@ -46,7 +46,7 @@ const PROGRESS_TIMELINE = [
   [20000, 50, '// обработка карточек...'],
   [35000, 70, '// семантическая оценка...'],
   [55000, 85, '// финализация...'],
-  [85000, 95, '// почти готово...'],
+  [85000, 95, '// финализация результатов...'],
 ]
 
 export function useLogStream(active) {
@@ -109,9 +109,12 @@ export function useLogStream(active) {
     }
   }, [active])
 
-  // Mark 100% when loading finishes
+  // Mark 100% + завершено when loading finishes
   useEffect(() => {
-    if (!active) setProgress(p => (p > 0 ? 100 : p))
+    if (!active) {
+      setProgress(p => (p > 0 ? 100 : p))
+      setLastMsg(prev => prev ? '// завершено' : prev)
+    }
   }, [active])
 
   return { lines, progress, lastMsg }

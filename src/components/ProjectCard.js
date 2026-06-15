@@ -127,7 +127,7 @@ export default function ProjectCard({ project }) {
           onClick={handleGenerateCp}
           disabled={cpState === 'loading'}
         >
-          {cpState === 'loading' ? 'генерирую…' : cpState === 'done' ? 'переписать кп' : 'сгенерировать кп'}
+          {cpState === 'loading' ? 'генерирую…' : cpState === 'done' ? 'дать кп ещё раз' : 'дать кп'}
         </button>
       </div>
 
