@@ -52,7 +52,7 @@ class Config:
     # Gemini AI — embeddings for semantic evaluation (optional)
     GEMINI_API_KEY: Optional[str] = os.getenv('GEMINI_API_KEY')
     # OpenRouter — chat completions and КП generation (model: openai/gpt-oss-120b:free)
-    OPENROUTER_API_KEY: Optional[str] = os.getenv('gpt-oss-120b')
+    OPENROUTER_API_KEY: Optional[str] = os.getenv('OPENROUTER_API_KEY')
     SEMANTIC_SIMILARITY_THRESHOLD: float = float(os.getenv('SEMANTIC_SIMILARITY_THRESHOLD', '0.50'))  # Lowered from 0.75 to 0.50 for better matching
 
     # Search limits
