@@ -81,7 +81,9 @@ class AgentA:
             return False
         try:
             import json
-            cookies = json.loads(config.KWORK_COOKIES.strip())
+            import re
+            raw = re.sub(r'[\x00-\x1f\x7f]', '', config.KWORK_COOKIES)
+            cookies = json.loads(raw)
             self.driver.get(config.KWORK_BASE_URL)
             self.human_delay(1, 2)
             injected = 0
