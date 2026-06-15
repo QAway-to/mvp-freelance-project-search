@@ -922,6 +922,93 @@ class AgentA:
             log_agent_action("Agent A", f"❌ [PARSE] Extraction error: {e}", level="ERROR")
             return None
 
+    def submit_response(self, url: str, cp_text: str) -> bool:
+        """Submit a response (отклик) on a Kwork project page via Selenium."""
+        if not self.driver:
+            self.setup_driver()
+        if not self.logged_in:
+            self.login()
+
+        log_agent_action("Agent A", f"📨 [RESPOND] Navigating to {url}")
+        try:
+            self.driver.get(url)
+            self.human_delay(2, 4)
+        except Exception as e:
+            log_agent_action("Agent A", f"❌ [RESPOND] Failed to load page: {e}", level="ERROR")
+            return False
+
+        try:
+            # Click "Откликнуться" button
+            respond_btn = None
+            for sel in [
+                "button.want-card__respond-btn",
+                "button[class*='respond']",
+                "a[class*='respond']",
+                ".want-card__footer button",
+            ]:
+                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
+                if els:
+                    respond_btn = els[0]
+                    break
+
+            if not respond_btn:
+                # Try by text content
+                buttons = self.driver.find_elements(By.TAG_NAME, "button")
+                for btn in buttons:
+                    if "откликнуться" in btn.text.lower() or "отклик" in btn.text.lower():
+                        respond_btn = btn
+                        break
+
+            if not respond_btn:
+                log_agent_action("Agent A", "❌ [RESPOND] Could not find respond button", level="ERROR")
+                return False
+
+            self.driver.execute_script("arguments[0].click();", respond_btn)
+            self.human_delay(1, 2)
+
+            # Find textarea and fill CP text
+            textarea = None
+            for sel in ["textarea[name='description']", "textarea[class*='respond']", "textarea"]:
+                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
+                if els:
+                    textarea = els[0]
+                    break
+
+            if not textarea:
+                log_agent_action("Agent A", "❌ [RESPOND] Could not find textarea", level="ERROR")
+                return False
+
+            textarea.clear()
+            self.human_delay(0.5, 1)
+            textarea.send_keys(cp_text)
+            self.human_delay(1, 2)
+
+            # Click submit
+            submit_btn = None
+            for sel in [
+                "button[type='submit']",
+                "button.js-respond-form-submit",
+                "button[class*='submit']",
+            ]:
+                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
+                if els:
+                    submit_btn = els[0]
+                    break
+
+            if not submit_btn:
+                log_agent_action("Agent A", "❌ [RESPOND] Could not find submit button", level="ERROR")
+                return False
+
+            self.driver.execute_script("arguments[0].click();", submit_btn)
+            self.human_delay(2, 3)
+
+            log_agent_action("Agent A", f"✅ [RESPOND] Response submitted to {url}")
+            return True
+
+        except Exception as e:
+            log_agent_action("Agent A", f"❌ [RESPOND] Error submitting response: {e}", level="ERROR")
+            return False
+
     async def stop(self):
         """Stop the agent"""
         log_agent_action("Agent A", "Stopping agent")
@@ -934,3 +1021,6 @@ class AgentA:
                 self.driver = None
             except Exception as e:
                 log_agent_action("Agent A", f"Error closing driver: {e}")
+
+
+agent_a_instance = None  # set by main.py after instantiation

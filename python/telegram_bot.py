@@ -1,8 +1,8 @@
 import os
 from typing import Any
 
-from telegram import Update
-from telegram.ext import Application, MessageHandler, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, MessageHandler, CallbackQueryHandler, filters
 from telegram.error import TelegramError
 
 from config import config
@@ -18,22 +18,23 @@ def _load_system_prompt() -> str:
             return f.read().strip()
     except Exception as e:
         log_agent_action("Telegram", f"⚠️ Could not load cp_system.txt: {e}", level="WARNING")
-        return "Ты — Александр, фрилансер. Помогаешь с анализом проектов и написанием КП на русском."
+        return "Ты — Александр, фрилансер. Пишешь коммерческие предложения на русском языке. Пиши кратко, конкретно, без шаблонов."
 
 
 _SYSTEM_PROMPT = _load_system_prompt()
 
-# Max conversation turns to keep (system prompt + last N messages)
 _MAX_HISTORY = 20
 
 
 class TelegramBot:
     def __init__(self):
         self._app: Application | None = None
-        # chat_id -> found projects from last search
+        # chat_id -> list of projects from last search
         self._projects: dict[str, list[dict[str, Any]]] = {}
-        # chat_id -> OpenRouter messages history (system + user/assistant turns)
+        # chat_id -> conversation history for free chat
         self._conversations: dict[str, list[dict[str, str]]] = {}
+        # (chat_id, project_index) -> generated CP text (for resend/edit)
+        self._pending_cp: dict[tuple[str, int], str] = {}
 
     async def start(self) -> None:
         if not config.TELEGRAM_BOT_TOKEN:
@@ -41,6 +42,7 @@ class TelegramBot:
             return
         try:
             self._app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
+            self._app.add_handler(CallbackQueryHandler(self._handle_callback))
             self._app.add_handler(
                 MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message)
             )
@@ -60,7 +62,7 @@ class TelegramBot:
             log_agent_action("Telegram", "Bot stopped")
 
     async def send_projects_for_confirmation(self, projects: list[dict[str, Any]]) -> None:
-        """Send found projects to Telegram and initialise conversation context."""
+        """Send each project as a separate message with inline КП button."""
         if not self._app or not config.TELEGRAM_CHANNEL_ID:
             return
         if not projects:
@@ -69,64 +71,172 @@ class TelegramBot:
         chat_id = str(config.TELEGRAM_CHANNEL_ID)
         self._projects[chat_id] = projects
 
-        # Build display message + LLM context
-        msg_lines = ["🎯 <b>Найдено проектов:</b>\n"]
-        ctx_lines = []
-        for i, p in enumerate(projects, 1):
-            title = (p.get("title") or "?")[:70]
-            budget = p.get("budget") or "?"
+        await self.send_notification(f"🎯 <b>Найдено {len(projects)} проектов:</b>")
+
+        for i, p in enumerate(projects):
+            title = (p.get("title") or "?")[:80]
+            budget = p.get("budget") or "не указан"
             url = p.get("url") or ""
-            desc = (p.get("description") or "")[:300]
-            msg_lines.append(
-                f"{i}. <b>{title}</b>\n"
-                f"   💰 {budget}\n"
-                f"   🔗 {url}\n"
+            desc = (p.get("description") or "")[:400]
+            time_left = p.get("timeLeft") or ""
+
+            text = (
+                f"<b>{i + 1}. {title}</b>\n"
+                f"💰 {budget}"
+                + (f"  ⏳ {time_left}" if time_left else "") + "\n"
+                + (f"\n{desc}\n" if desc else "")
+                + (f"\n🔗 {url}" if url else "")
             )
-            ctx_lines.append(
-                f"Проект {i}: {title}\n"
+
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✍️ Написать КП", callback_data=f"cp:{i}")
+            ]])
+
+            try:
+                await self._app.bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    parse_mode="HTML",
+                    disable_web_page_preview=True,
+                    reply_markup=keyboard,
+                )
+            except TelegramError as e:
+                log_agent_action("Telegram", f"Failed to send project {i + 1}: {e}", level="ERROR")
+
+        log_agent_action("Telegram", f"Sent {len(projects)} project cards to chat")
+
+    async def _handle_callback(self, update: Update, context) -> None:
+        query = update.callback_query
+        await query.answer()
+
+        chat_id = str(update.effective_chat.id)
+        data = query.data or ""
+
+        if data.startswith("cp:"):
+            await self._generate_cp(query, chat_id, int(data[3:]))
+
+        elif data.startswith("rewrite:"):
+            await self._generate_cp(query, chat_id, int(data[8:]), rewrite=True)
+
+        elif data.startswith("send:"):
+            await self._send_response(query, chat_id, int(data[5:]))
+
+    async def _generate_cp(self, query, chat_id: str, idx: int, rewrite: bool = False) -> None:
+        projects = self._projects.get(chat_id, [])
+        if idx >= len(projects):
+            await query.edit_message_reply_markup(reply_markup=None)
+            return
+
+        p = projects[idx]
+        title = p.get("title") or "?"
+        budget = p.get("budget") or "не указан"
+        desc = p.get("description") or "(нет описания)"
+
+        action = "Переписываю" if rewrite else "Генерирую"
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except TelegramError:
+            pass
+
+        thinking_msg = None
+        try:
+            thinking_msg = await query.message.reply_text(f"⏳ {action} КП...")
+        except TelegramError:
+            pass
+
+        messages = [
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": (
+                f"Напиши КП для заказа с Kwork.\n\n"
+                f"Название: {title}\n"
                 f"Бюджет: {budget}\n"
-                f"Ссылка: {url}\n"
-                f"Описание: {desc or '(нет)'}"
-            )
+                f"Описание:\n{desc}"
+            )},
+        ]
+        if rewrite:
+            prev = self._pending_cp.get((chat_id, idx), "")
+            if prev:
+                messages.append({"role": "assistant", "content": prev})
+                messages.append({"role": "user", "content": "Перепиши КП — другой подход, другие слова."})
 
-        msg_lines.append("💬 Напиши что думаешь — обсудим или попроси написать КП для любого.")
+        cp_text = await chat_completion(messages)
 
-        system_with_projects = (
-            f"{_SYSTEM_PROMPT}\n\n"
-            f"---\n"
-            f"НАЙДЕННЫЕ ПРОЕКТЫ С KWORK:\n\n"
-            + "\n\n".join(ctx_lines)
-            + "\n\n---\n"
-            "Помоги выбрать подходящие. Когда попросят — напиши КП по профилю выше."
-        )
-        self._conversations[chat_id] = [{"role": "system", "content": system_with_projects}]
+        self._pending_cp[(chat_id, idx)] = cp_text
+
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔄 Переписать", callback_data=f"rewrite:{idx}"),
+            InlineKeyboardButton("✅ Отправить отклик", callback_data=f"send:{idx}"),
+        ]])
 
         try:
-            await self._app.bot.send_message(
-                chat_id=chat_id,
-                text="\n".join(msg_lines),
-                parse_mode="HTML",
-                disable_web_page_preview=True,
-            )
-            log_agent_action("Telegram", f"Sent {len(projects)} projects to chat")
+            if thinking_msg:
+                await thinking_msg.edit_text(cp_text, reply_markup=keyboard)
+            else:
+                await query.message.reply_text(cp_text, reply_markup=keyboard)
+        except TelegramError:
+            try:
+                if thinking_msg:
+                    await thinking_msg.edit_text(cp_text, reply_markup=keyboard, parse_mode=None)
+            except TelegramError as e:
+                log_agent_action("Telegram", f"Failed to send CP: {e}", level="ERROR")
+
+        log_agent_action("Telegram", f"КП сгенерировано для проекта {idx + 1} ({len(cp_text)} симв.)")
+
+    async def _send_response(self, query, chat_id: str, idx: int) -> None:
+        """Submit the approved CP as a Kwork response via Selenium."""
+        projects = self._projects.get(chat_id, [])
+        cp_text = self._pending_cp.get((chat_id, idx))
+
+        if idx >= len(projects) or not cp_text:
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+                await query.message.reply_text("⚠️ КП не найдено. Сначала сгенерируй его.")
+            except TelegramError:
+                pass
+            return
+
+        p = projects[idx]
+        url = p.get("url") or ""
+
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+            await query.message.reply_text("⏳ Отправляю отклик на Kwork...")
+        except TelegramError:
+            pass
+
+        # Import here to avoid circular import
+        from agents.agent_a import agent_a_instance
+        try:
+            success = await agent_a_instance.submit_response(url, cp_text)
+        except Exception as e:
+            log_agent_action("Telegram", f"submit_response raised: {e}", level="ERROR")
+            success = False
+
+        result_text = (
+            f"✅ Отклик отправлен на:\n{url}"
+            if success else
+            f"❌ Не удалось отправить отклик.\nПроверь вручную: {url}"
+        )
+
+        try:
+            await query.message.reply_text(result_text, disable_web_page_preview=True)
         except TelegramError as e:
-            log_agent_action("Telegram", f"Failed to send projects: {e}", level="ERROR")
+            log_agent_action("Telegram", f"Failed to send result: {e}", level="ERROR")
 
     async def _handle_message(self, update: Update, context) -> None:
+        """Free-form chat with LLM."""
         if not update.message or not update.message.text:
             return
 
         chat_id = str(update.effective_chat.id)
         text = update.message.text.strip()
 
-        # If no active search context — use bare system prompt
         if chat_id not in self._conversations:
             self._conversations[chat_id] = [{"role": "system", "content": _SYSTEM_PROMPT}]
 
         conv = self._conversations[chat_id]
         conv.append({"role": "user", "content": text})
 
-        # Show placeholder while LLM thinks, then replace with real answer
         thinking_msg = None
         try:
             thinking_msg = await update.message.reply_text("⏳")
@@ -135,11 +245,10 @@ class TelegramBot:
 
         reply = await chat_completion(conv)
 
-        # Don't store error strings in conversation history
         _is_error = reply.startswith("Ошибка запроса:") or reply.startswith("OpenRouter API key")
         if _is_error:
             log_agent_action("Telegram", f"LLM error: {reply}", level="ERROR")
-            conv.pop()  # remove the unanswered user message
+            conv.pop()
             safe = "⚠️ Не удалось получить ответ. Попробуй ещё раз."
             try:
                 if thinking_msg:
@@ -151,19 +260,15 @@ class TelegramBot:
             return
 
         conv.append({"role": "assistant", "content": reply})
-
-        # Keep history bounded: system[0] + last _MAX_HISTORY messages
         if len(conv) > _MAX_HISTORY + 1:
             self._conversations[chat_id] = [conv[0]] + conv[-_MAX_HISTORY:]
 
-        # Replace placeholder with actual reply
         try:
             if thinking_msg:
                 await thinking_msg.edit_text(reply, parse_mode="HTML")
             else:
                 await update.message.reply_text(reply, parse_mode="HTML")
         except TelegramError:
-            # Fallback: plain text if HTML parsing fails
             try:
                 if thinking_msg:
                     await thinking_msg.edit_text(reply)

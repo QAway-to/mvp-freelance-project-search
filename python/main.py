@@ -18,6 +18,9 @@ setup_logging()
 
 agent_a = AgentA()
 
+import agents.agent_a as _agent_a_module
+_agent_a_module.agent_a_instance = agent_a
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
