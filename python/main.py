@@ -208,6 +208,21 @@ async def api_search(request: Request):
     return {"success": True, "data": projects, "meta": {"total": len(projects), "took_ms": round((time.time()-t0)*1000)}, "error": None}
 
 
+@app.post("/api/respond")
+async def api_respond(request: Request):
+    """Submit a Kwork response for a project URL with given CP text."""
+    data = await request.json()
+    url = (data.get("url") or "").strip()
+    cp_text = (data.get("cp_text") or "").strip()
+    if not url or not cp_text:
+        raise HTTPException(status_code=400, detail="url and cp_text required")
+
+    success = await asyncio.to_thread(agent_a.submit_response, url, cp_text)
+    if success:
+        return {"success": True, "message": "Отклик отправлен"}
+    return JSONResponse({"success": False, "message": "Не удалось отправить отклик"}, status_code=422)
+
+
 @app.post("/api/parse")
 async def api_parse(request: Request):
     """Parse single Kwork URL for Next.js UI proxy."""

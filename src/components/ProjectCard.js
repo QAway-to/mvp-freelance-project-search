@@ -8,6 +8,10 @@ export default function ProjectCard({ project }) {
   const [copied, setCopied] = useState(false)
   const [copyFailed, setCopyFailed] = useState(false)
 
+  const [cpState, setCpState] = useState('idle') // idle | loading | done | error
+  const [cpText, setCpText] = useState('')
+  const [respondState, setRespondState] = useState('idle') // idle | confirm | sending | done | error
+
   const score = project.evaluation?.totalScore
   const scoreLabel = score != null ? `${(score * 100).toFixed(0)}%` : null
   const scoreClass = score >= 0.8 ? 'score-high' : score >= 0.5 ? 'score-medium' : 'score-low'
@@ -20,6 +24,53 @@ export default function ProjectCard({ project }) {
     } catch {
       setCopyFailed(true)
       setTimeout(() => setCopyFailed(false), 2000)
+    }
+  }
+
+  async function handleGenerateCp() {
+    setCpState('loading')
+    setCpText('')
+    setRespondState('idle')
+    try {
+      const res = await fetch('/api/projects/cp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: project.description,
+          budget: project.budget,
+          title: project.title,
+        }),
+      })
+      const data = await res.json()
+      if (data.proposal) {
+        setCpText(data.proposal)
+        setCpState('done')
+      } else {
+        setCpState('error')
+      }
+    } catch {
+      setCpState('error')
+    }
+  }
+
+  async function handleSubmitRespond() {
+    if (respondState === 'idle') {
+      setRespondState('confirm')
+      return
+    }
+    if (respondState === 'confirm') {
+      setRespondState('sending')
+      try {
+        const res = await fetch('/api/projects/respond', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: project.url, cp_text: cpText }),
+        })
+        const data = await res.json()
+        setRespondState(data.success ? 'done' : 'error')
+      } catch {
+        setRespondState('error')
+      }
     }
   }
 
@@ -70,7 +121,60 @@ export default function ProjectCard({ project }) {
             </button>
           </>
         )}
+        <button
+          type="button"
+          className="btn btn-sm btn-primary"
+          onClick={handleGenerateCp}
+          disabled={cpState === 'loading'}
+        >
+          {cpState === 'loading' ? 'генерирую…' : cpState === 'done' ? 'переписать кп' : 'сгенерировать кп'}
+        </button>
       </div>
+
+      {cpState === 'error' && (
+        <p className="cp-error">Ошибка генерации КП. Проверь OPENROUTER_API_KEY.</p>
+      )}
+
+      {cpState === 'done' && cpText && (
+        <div className="cp-section">
+          <div className="cp-label">коммерческое предложение</div>
+          <pre className="cp-text">{cpText}</pre>
+          <div className="cp-actions">
+            {respondState === 'done' && (
+              <span className="cp-status cp-status-ok">✓ отклик отправлен</span>
+            )}
+            {respondState === 'error' && (
+              <span className="cp-status cp-status-err">✗ ошибка отправки</span>
+            )}
+            {respondState !== 'done' && (
+              <>
+                {respondState === 'confirm' && (
+                  <span className="cp-confirm-hint">уверен? нажми ещё раз →</span>
+                )}
+                <button
+                  type="button"
+                  className={`btn btn-sm ${respondState === 'confirm' ? 'btn-primary' : ''}`}
+                  onClick={handleSubmitRespond}
+                  disabled={respondState === 'sending'}
+                >
+                  {respondState === 'sending' ? 'отправляю…'
+                    : respondState === 'confirm' ? '✓ подтвердить отклик'
+                    : 'отправить отклик'}
+                </button>
+                {respondState === 'confirm' && (
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => setRespondState('idle')}
+                  >
+                    отмена
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
