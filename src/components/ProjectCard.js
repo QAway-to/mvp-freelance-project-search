@@ -101,7 +101,11 @@ export default function ProjectCard({ project, platform = 'kwork' }) {
 
       <div className="project-meta">
         {project.timeLeft != null && (
-          <span><span className="meta-key">time </span>{Number(project.timeLeft).toFixed(2)}h</span>
+          <span><span className="meta-key">time </span>{
+            isNaN(Number(project.timeLeft))
+              ? project.timeLeft
+              : `${Number(project.timeLeft).toFixed(2)}h`
+          }</span>
         )}
         {project.budget && (
           <span><span className="meta-key">бюджет </span>{project.budget}</span>

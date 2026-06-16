@@ -141,12 +141,13 @@ async def get_projects():
 @app.post("/agent/generate-cp")
 async def generate_cp(request: Request):
     data = await request.json()
-    description = data.get("description")
-    budget = data.get("budget", "Не указан")
-    if not description:
-        return {"status": "error", "message": "Description is required"}
+    description = data.get("description") or ""
+    budget = data.get("budget") or "Не указан"
+    title = data.get("title") or ""
+    if not description and not title:
+        return {"status": "error", "message": "Description or title required"}
     from utils.cp_generator import generate_proposal
-    proposal = await generate_proposal({"description": description, "budget": budget, "title": ""})
+    proposal = await generate_proposal({"description": description, "budget": budget, "title": title})
     return {"status": "success", "proposal": proposal}
 
 

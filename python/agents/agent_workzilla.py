@@ -278,10 +278,25 @@ class AgentWorkzilla:
                 if not title:
                     continue
 
+                # Click to expand card and get description
+                description = ""
+                try:
+                    self.driver.execute_script("arguments[0].click();", link)
+                    self._human_delay(0.8, 1.5)
+                    for sel in [".external-links-wrapper span", ".order-description span", ".description"]:
+                        els = self.driver.find_elements(By.CSS_SELECTOR, sel)
+                        if els:
+                            texts = [e.text.strip() for e in els if e.text.strip()]
+                            if texts:
+                                description = "\n".join(texts)
+                                break
+                except Exception:
+                    pass
+
                 projects.append({
                     "id": order_id,
                     "title": title,
-                    "description": "",
+                    "description": description,
                     "budget": budget,
                     "url": url,
                     "timeLeft": time_left,
