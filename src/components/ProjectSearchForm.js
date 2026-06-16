@@ -52,8 +52,20 @@ export default function ProjectSearchForm({ onSearch, onParseUrl, isLoading, sta
         </span>
       </div>
 
-      {activeTab === 'search' && (
+      {activeTab === 'search' && platform === 'kwork' && (
         <SearchTab onSearch={onSearch} isLoading={isLoading} />
+      )}
+      {activeTab === 'search' && platform === 'workzilla' && (
+        <div style={{ paddingTop: '8px' }}>
+          <button
+            type="button"
+            className="btn btn-primary btn-block"
+            onClick={() => onSearch()}
+            disabled={isLoading}
+          >
+            {isLoading ? '> searching...' : '> search workzilla'}
+          </button>
+        </div>
       )}
       {activeTab === 'url' && (
         <UrlTab onParseUrl={onParseUrl} isLoading={isLoading} />
