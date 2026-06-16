@@ -614,6 +614,12 @@ class AgentA:
 
         log_agent_action("Agent A", f"✅ [LISTING] Collection complete: {len(all_projects)} projects")
 
+        # Free Chrome memory — cookies will be re-injected on next search
+        from browser import quit_driver
+        quit_driver()
+        self.driver = None
+        self.logged_in = False
+
         # Deduplicate by URL (keep first occurrence — avoids nested .want-card duplicates)
         seen_urls: set = set()
         unique: list = []

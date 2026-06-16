@@ -2,11 +2,10 @@ import re
 import time
 import random
 import os
-import json
+import threading
 from typing import List, Dict, Any
 
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import WebDriverException
 
 from browser import create_driver
 from config import config
@@ -20,11 +19,16 @@ class AgentWorkzilla:
     def __init__(self):
         self.driver = None
         self.logged_in = False
-        self._cached_cookies: List[Dict] = []
         self.status = "stopped"
+        self._lock = threading.Lock()
 
     def _human_delay(self, lo: float = 1.0, hi: float = 2.5):
         time.sleep(random.uniform(lo, hi))
+
+    def setup_driver(self):
+        log_agent_action("Workzilla", "🔧 [SELENIUM] Starting browser...")
+        self.driver = create_driver()
+        log_agent_action("Workzilla", "✅ [SELENIUM] Browser ready")
 
     # ── Google Drive ──────────────────────────────────────────────────────────
 
@@ -76,12 +80,13 @@ class AgentWorkzilla:
             log_agent_action("Workzilla", f"⏳ [AUTH] Waiting... ({int(deadline - time.time())}s left)")
         return None
 
-    # ── Login (ephemeral Chrome) ──────────────────────────────────────────────
+    # ── Login ─────────────────────────────────────────────────────────────────
 
     def login(self) -> bool:
-        """Login via ephemeral Chrome, save cookies for subsequent scraping."""
-        if self.logged_in and self._cached_cookies:
+        if self.logged_in:
             return True
+        if not self.driver:
+            self.setup_driver()
 
         file_id = os.getenv("GDRIVE_VERIFY_FILE_ID")
         email = os.getenv("WORKZILLA_EMAIL")
@@ -89,17 +94,15 @@ class AgentWorkzilla:
             log_agent_action("Workzilla", "❌ [AUTH] Set GDRIVE_VERIFY_FILE_ID + WORKZILLA_EMAIL", level="ERROR")
             return False
 
-        log_agent_action("Workzilla", "🔧 [AUTH] Starting ephemeral Chrome for login...")
-        driver = create_driver()
-        try:
-            login_url = f"{BASE_URL}/account/login?ReturnUrl=%2Ffreelancer"
-            driver.get(login_url)
-            self._human_delay(2, 3)
+        login_url = f"{BASE_URL}/account/login?ReturnUrl=%2Ffreelancer"
+        log_agent_action("Workzilla", "🌐 [AUTH] Opening login page...")
+        self.driver.get(login_url)
+        self._human_delay(2, 3)
 
-            # Find email field
+        try:
             field = None
             for sel in ["input#email", "input[name='email']", "input[type='email']", "input.large"]:
-                els = driver.find_elements(By.CSS_SELECTOR, sel)
+                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
                 if els:
                     field = els[0]
                     break
@@ -111,11 +114,10 @@ class AgentWorkzilla:
             field.send_keys(email)
             self._human_delay(0.5, 1)
 
-            # Click submit link
             for sel in ["a.wz-button.single-auth-btn", "a.single-auth-btn", "a.wz-button"]:
-                els = driver.find_elements(By.CSS_SELECTOR, sel)
+                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
                 if els:
-                    driver.execute_script("arguments[0].click();", els[0])
+                    self.driver.execute_script("arguments[0].click();", els[0])
                     break
 
             self._human_delay(1, 2)
@@ -128,230 +130,206 @@ class AgentWorkzilla:
                 return False
 
             log_agent_action("Workzilla", "🔗 [AUTH] Navigating to magic link...")
-            driver.get(magic_link)
+            self.driver.get(magic_link)
             self._human_delay(2, 3)
 
-            if "login" in driver.current_url:
+            if "login" in self.driver.current_url:
                 log_agent_action("Workzilla", "⚠️ [AUTH] Magic link navigation failed", level="WARNING")
                 return False
 
-            # Save cookies for reuse
-            self._cached_cookies = driver.get_cookies()
             self.logged_in = True
-            log_agent_action("Workzilla", f"✅ [AUTH] Logged in, saved {len(self._cached_cookies)} cookies")
+            log_agent_action("Workzilla", "✅ [AUTH] Logged in successfully")
             return True
 
         except Exception as e:
             log_agent_action("Workzilla", f"❌ [AUTH] Login error: {e}", level="ERROR")
             return False
-        finally:
-            driver.quit()
-            log_agent_action("Workzilla", "🔧 [AUTH] Login Chrome closed")
 
-    # ── Scraping (ephemeral Chrome + cached cookies) ──────────────────────────
-
-    def _inject_cookies(self, driver, cookies: List[Dict]) -> int:
-        driver.get(BASE_URL)
-        self._human_delay(1, 1.5)
-        injected = 0
-        for c in cookies:
-            try:
-                driver.add_cookie({
-                    "name": c["name"],
-                    "value": c["value"],
-                    "domain": c.get("domain", ".work-zilla.com"),
-                    "path": c.get("path", "/"),
-                })
-                injected += 1
-            except Exception:
-                pass
-        return injected
+    # ── Scraping ──────────────────────────────────────────────────────────────
 
     def scrape_orders(self, limit: int = 10) -> List[Dict[str, Any]]:
+        with self._lock:
+            return self._scrape_orders_locked(limit)
+
+    def _scrape_orders_locked(self, limit: int) -> List[Dict[str, Any]]:
+        if not self.driver:
+            self.setup_driver()
         if not self.logged_in:
             if not self.login():
                 return []
 
-        log_agent_action("Workzilla", "🔧 [SCRAPE] Starting ephemeral Chrome...")
-        driver = create_driver()
-        try:
-            injected = self._inject_cookies(driver, self._cached_cookies)
-            log_agent_action("Workzilla", f"🍪 [SCRAPE] Injected {injected} cookies")
+        log_agent_action("Workzilla", f"🌐 [SCRAPE] Loading {ORDERS_URL}")
+        self.driver.get(ORDERS_URL)
+        self._human_delay(2, 4)
 
-            driver.get(ORDERS_URL)
-            self._human_delay(2, 3)
-
-            if "login" in driver.current_url:
-                log_agent_action("Workzilla", "⚠️ [SCRAPE] Session expired", level="WARNING")
-                self.logged_in = False
-                self._cached_cookies = []
+        if "login" in self.driver.current_url:
+            log_agent_action("Workzilla", "⚠️ [SCRAPE] Session expired — re-authenticating...", level="WARNING")
+            self.logged_in = False
+            if not self.login():
                 return []
+            self.driver.get(ORDERS_URL)
+            self._human_delay(2, 4)
 
-            headers = driver.find_elements(By.CSS_SELECTOR, ".order-header")
-            total = len(headers)
-            log_agent_action("Workzilla", f"📋 [SCRAPE] Found {total} cards, processing first {min(limit, total)}")
+        # Count cards and links (found separately — they are siblings, not nested)
+        initial_headers = self.driver.find_elements(By.CSS_SELECTOR, ".order-header")
+        initial_links = self.driver.find_elements(By.CSS_SELECTOR, "a.order-in-list-link")
+        count = min(limit, len(initial_headers), len(initial_links))
+        log_agent_action("Workzilla", f"📋 [SCRAPE] Found {len(initial_headers)} headers / {len(initial_links)} links, processing {count}")
 
-            if not headers:
-                log_agent_action("Workzilla", "⚠️ [SCRAPE] No .order-header cards found", level="WARNING")
-                return []
-
-            projects = []
-            for i in range(min(limit, total)):
-                try:
-                    # Re-find every iteration — DOM changes after each expand
-                    headers = driver.find_elements(By.CSS_SELECTOR, ".order-header")
-                    if i >= len(headers):
-                        break
-                    header = headers[i]
-
-                    # Title
-                    title = ""
-                    for sel in [".title .text-wrapper", ".title-container .text-wrapper", ".text-wrapper"]:
-                        els = header.find_elements(By.CSS_SELECTOR, sel)
-                        if els and els[0].text.strip():
-                            title = els[0].text.strip()
-                            break
-
-                    # Budget
-                    budget = ""
-                    els = header.find_elements(By.CSS_SELECTOR, ".price-order-in-list .param-title")
-                    if els:
-                        budget = els[0].text.strip() + " ₽"
-
-                    # Time left
-                    time_left = ""
-                    els = header.find_elements(By.CSS_SELECTOR, ".time-title")
-                    if els:
-                        time_left = els[0].text.strip()
-
-                    # URL / order id
-                    url = ""
-                    order_id = str(i)
-                    link_els = header.find_elements(By.CSS_SELECTOR, "a.order-in-list-link")
-                    if link_els:
-                        href = link_els[0].get_attribute("href") or ""
-                        url = href if href.startswith("http") else BASE_URL + href
-                        m = re.search(r'/freelancer/(\d+)', url)
-                        if m:
-                            order_id = m.group(1)
-
-                    if not title:
-                        continue
-
-                    # Click to expand and read description from parent container
-                    description = ""
-                    try:
-                        if link_els:
-                            driver.execute_script("arguments[0].click();", link_els[0])
-                            self._human_delay(1.0, 1.8)
-
-                            # Get parent container, search description inside it
-                            parent = driver.execute_script(
-                                "return arguments[0].closest('.order-item, .order-wrapper, li, article') "
-                                "|| arguments[0].parentNode;",
-                                header
-                            )
-                            if parent:
-                                for sel in [".external-links-wrapper span", ".order-description span",
-                                            ".order-body span", ".task-description"]:
-                                    desc_els = parent.find_elements(By.CSS_SELECTOR, sel)
-                                    texts = [e.text.strip() for e in desc_els if e.text.strip()]
-                                    if texts:
-                                        description = "\n".join(texts)
-                                        break
-                    except Exception as e:
-                        log_agent_action("Workzilla", f"⚠️ [SCRAPE] Expand error card {i+1}: {e}", level="WARNING")
-
-                    log_agent_action("Workzilla", f"📋 [SCRAPE] {i+1}: {title[:50]} | desc={len(description)}ch")
-                    projects.append({
-                        "id": order_id,
-                        "title": title,
-                        "description": description,
-                        "budget": budget,
-                        "url": url,
-                        "timeLeft": time_left,
-                        "proposals": None,
-                        "hired": None,
-                        "platform": "workzilla",
-                    })
-                except Exception as e:
-                    log_agent_action("Workzilla", f"⚠️ [SCRAPE] Card {i+1} error: {e}", level="WARNING")
-
-            log_agent_action("Workzilla", f"✅ [SCRAPE] Collected {len(projects)} projects")
-            return projects
-
-        except Exception as e:
-            log_agent_action("Workzilla", f"❌ [SCRAPE] Fatal error: {e}", level="ERROR")
+        if count == 0:
+            log_agent_action("Workzilla", "⚠️ [SCRAPE] No cards found on page", level="WARNING")
             return []
-        finally:
-            driver.quit()
-            log_agent_action("Workzilla", "🔧 [SCRAPE] Chrome closed")
 
-    # ── Submit response (ephemeral Chrome) ───────────────────────────────────
+        projects = []
+        for i in range(count):
+            try:
+                # Re-find both lists every iteration — DOM changes after each expand
+                headers = self.driver.find_elements(By.CSS_SELECTOR, ".order-header")
+                links = self.driver.find_elements(By.CSS_SELECTOR, "a.order-in-list-link")
+
+                if i >= len(headers) or i >= len(links):
+                    break
+
+                header = headers[i]
+                link = links[i]
+
+                # Title
+                title = ""
+                for sel in [".title .text-wrapper", ".title-container .text-wrapper", ".text-wrapper"]:
+                    els = header.find_elements(By.CSS_SELECTOR, sel)
+                    if els and els[0].text.strip():
+                        title = els[0].text.strip()
+                        break
+
+                # Budget
+                budget = ""
+                els = header.find_elements(By.CSS_SELECTOR, ".price-order-in-list .param-title")
+                if els:
+                    budget = els[0].text.strip() + " ₽"
+
+                # Time left
+                time_left = ""
+                els = header.find_elements(By.CSS_SELECTOR, ".time-title")
+                if els:
+                    time_left = els[0].text.strip()
+
+                # URL / order id from link href
+                href = link.get_attribute("href") or ""
+                url = href if href.startswith("http") else BASE_URL + href
+                m = re.search(r'/freelancer/(\d+)', url)
+                order_id = m.group(1) if m else str(i)
+
+                if not title:
+                    log_agent_action("Workzilla", f"⚠️ [SCRAPE] Card {i+1}: no title, skipping")
+                    continue
+
+                # Click link to expand — link is sibling of header, not inside it
+                description = ""
+                try:
+                    self.driver.execute_script("arguments[0].click();", link)
+                    self._human_delay(1.0, 1.8)
+
+                    # Find parent container of the header, look for description inside it
+                    parent = self.driver.execute_script(
+                        "return arguments[0].closest('li, article, .order-item, .order-wrapper') "
+                        "|| arguments[0].parentNode;",
+                        header
+                    )
+                    if parent:
+                        for sel in [".external-links-wrapper span", ".order-description span",
+                                    ".order-body span", ".task-description span", ".description"]:
+                            desc_els = parent.find_elements(By.CSS_SELECTOR, sel)
+                            texts = [e.text.strip() for e in desc_els if e.text.strip()]
+                            if texts:
+                                description = "\n".join(texts)
+                                break
+
+                    # Fallback: global search, take last match (most recently expanded)
+                    if not description:
+                        for sel in [".external-links-wrapper span", ".order-description span"]:
+                            all_els = self.driver.find_elements(By.CSS_SELECTOR, sel)
+                            if all_els:
+                                description = all_els[-1].text.strip()
+                                break
+
+                except Exception as e:
+                    log_agent_action("Workzilla", f"⚠️ [SCRAPE] Expand error card {i+1}: {e}", level="WARNING")
+
+                log_agent_action("Workzilla", f"📋 [SCRAPE] {i+1}/{count}: {title[:50]} | desc={len(description)}ch")
+                projects.append({
+                    "id": order_id,
+                    "title": title,
+                    "description": description,
+                    "budget": budget,
+                    "url": url,
+                    "timeLeft": time_left,
+                    "proposals": None,
+                    "hired": None,
+                    "platform": "workzilla",
+                })
+            except Exception as e:
+                log_agent_action("Workzilla", f"⚠️ [SCRAPE] Card {i+1} error: {e}", level="WARNING")
+
+        log_agent_action("Workzilla", f"✅ [SCRAPE] Collected {len(projects)} projects")
+        return projects
+
+    # ── Submit response ───────────────────────────────────────────────────────
 
     def submit_response(self, url: str, cp_text: str) -> bool:
+        with self._lock:
+            return self._submit_response_locked(url, cp_text)
+
+    def _submit_response_locked(self, url: str, cp_text: str) -> bool:
         if not self.logged_in:
             if not self.login():
                 return False
 
-        # Extract order id from url to find card on list page
         order_id_match = re.search(r'/freelancer/(\d+)', url)
         order_id = order_id_match.group(1) if order_id_match else None
-
         log_agent_action("Workzilla", f"📨 [RESPOND] order_id={order_id}")
-        driver = create_driver()
-        try:
-            self._inject_cookies(driver, self._cached_cookies)
-            driver.get(ORDERS_URL)
+
+        self.driver.get(ORDERS_URL)
+        self._human_delay(2, 3)
+
+        # Find and expand the target card
+        if order_id:
+            links = self.driver.find_elements(By.CSS_SELECTOR, "a.order-in-list-link")
+            for link in links:
+                href = link.get_attribute("href") or ""
+                if order_id in href:
+                    self.driver.execute_script("arguments[0].click();", link)
+                    self._human_delay(1.5, 2.5)
+                    break
+        else:
+            self.driver.get(url)
             self._human_delay(2, 3)
 
-            # Find the correct order card by its link href containing order_id
-            target_link = None
-            if order_id:
-                links = driver.find_elements(By.CSS_SELECTOR, "a.order-in-list-link")
-                for link in links:
-                    href = link.get_attribute("href") or ""
-                    if order_id in href:
-                        target_link = link
-                        break
-
-            if not target_link:
-                # Fallback: navigate directly to the url
-                driver.get(url)
-                self._human_delay(2, 3)
-            else:
-                driver.execute_script("arguments[0].click();", target_link)
-                self._human_delay(1.5, 2.5)
-
-            # Find "согласиться" button in expanded area or on page
+        try:
             btn = None
             for sel in ["a.wz-button.answer-accept", ".answer-accept", "a[class*='answer-accept']"]:
-                els = driver.find_elements(By.CSS_SELECTOR, sel)
+                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
                 if els:
                     btn = els[0]
                     break
-
             if not btn:
                 log_agent_action("Workzilla", "❌ [RESPOND] Accept button not found", level="ERROR")
                 return False
 
-            driver.execute_script("arguments[0].click();", btn)
+            self.driver.execute_script("arguments[0].click();", btn)
             self._human_delay(1, 2)
 
-            # Fill textarea
             for sel in ["textarea", "textarea[name='comment']", "textarea[name='message']"]:
-                els = driver.find_elements(By.CSS_SELECTOR, sel)
+                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
                 if els:
                     els[0].clear()
                     els[0].send_keys(cp_text)
                     self._human_delay(0.5, 1)
                     break
 
-            # Submit
             for sel in ["button[type='submit']", ".modal button.wz-button", "input[type='submit']"]:
-                els = driver.find_elements(By.CSS_SELECTOR, sel)
+                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
                 if els:
-                    driver.execute_script("arguments[0].click();", els[0])
+                    self.driver.execute_script("arguments[0].click();", els[0])
                     self._human_delay(1, 2)
                     break
 
@@ -361,12 +339,14 @@ class AgentWorkzilla:
         except Exception as e:
             log_agent_action("Workzilla", f"❌ [RESPOND] Error: {e}", level="ERROR")
             return False
-        finally:
-            driver.quit()
-            log_agent_action("Workzilla", "🔧 [RESPOND] Chrome closed")
 
     async def stop(self):
-        self.driver = None
+        if self.driver:
+            try:
+                self.driver.quit()
+            except Exception:
+                pass
+            self.driver = None
         self.status = "stopped"
 
 
