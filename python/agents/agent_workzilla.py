@@ -94,8 +94,7 @@ class AgentWorkzilla:
 
         try:
             field = None
-            for sel in ["input[type='email']", "input[name='email']", "input[name='Login']",
-                        "input[placeholder*='mail']", "input[placeholder*='почт']", "input.form-control"]:
+            for sel in ["input#email", "input[name='email']", "input[type='email']", "input.large"]:
                 els = self.driver.find_elements(By.CSS_SELECTOR, sel)
                 if els:
                     field = els[0]
@@ -109,8 +108,8 @@ class AgentWorkzilla:
             field.send_keys(email)
             self._human_delay(0.5, 1)
 
-            # Submit
-            for sel in ["button[type='submit']", "input[type='submit']", "button.btn-primary", "button.login-btn"]:
+            # Submit — it's an <a> tag, not a <button>
+            for sel in ["a.wz-button.single-auth-btn", "a.single-auth-btn", "a.wz-button"]:
                 els = self.driver.find_elements(By.CSS_SELECTOR, sel)
                 if els:
                     self.driver.execute_script("arguments[0].click();", els[0])
