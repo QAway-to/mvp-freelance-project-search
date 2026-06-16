@@ -5,41 +5,54 @@ from utils.logger import log_agent_action
 _driver = None
 
 
-def get_driver():
-    global _driver
-    if _driver is not None:
-        try:
-            _ = _driver.current_url  # probe — raises if dead
-            return _driver
-        except Exception:
-            _driver = None
-
-    log_agent_action("Browser", "🔧 Starting shared Chrome instance...")
+def _build_options() -> uc.ChromeOptions:
     options = uc.ChromeOptions()
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--window-size=1280,800")
     options.add_argument("--mute-audio")
     options.add_argument("--disable-background-networking")
     options.add_argument("--disable-default-apps")
     options.add_argument("--no-first-run")
+    return options
 
-    chrome_bin = os.getenv("CHROME_BIN") or os.getenv("GOOGLE_CHROME_BIN")
-    if not chrome_bin:
-        for path in ["/usr/bin/google-chrome-stable", "/usr/bin/google-chrome", "/usr/bin/chromium"]:
-            if os.path.exists(path):
-                chrome_bin = path
-                break
 
-    _driver = uc.Chrome(
-        options=options,
-        browser_executable_path=chrome_bin,
+def _chrome_bin() -> str | None:
+    path = os.getenv("CHROME_BIN") or os.getenv("GOOGLE_CHROME_BIN")
+    if path:
+        return path
+    for candidate in ["/usr/bin/google-chrome-stable", "/usr/bin/google-chrome", "/usr/bin/chromium"]:
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def create_driver():
+    """Create a fresh Chrome instance. Caller must call .quit() when done."""
+    log_agent_action("Browser", "🔧 Starting Chrome...")
+    driver = uc.Chrome(
+        options=_build_options(),
+        browser_executable_path=_chrome_bin(),
         headless=True,
         use_subprocess=False,
     )
-    _driver.set_page_load_timeout(30)
-    log_agent_action("Browser", "✅ Shared Chrome ready")
+    driver.set_page_load_timeout(30)
+    log_agent_action("Browser", "✅ Chrome ready")
+    return driver
+
+
+def get_driver():
+    """Shared Chrome singleton for Kwork agent."""
+    global _driver
+    if _driver is not None:
+        try:
+            _ = _driver.current_url
+            return _driver
+        except Exception:
+            _driver = None
+
+    _driver = create_driver()
     return _driver
 
 
@@ -51,4 +64,4 @@ def quit_driver():
         except Exception:
             pass
         _driver = None
-        log_agent_action("Browser", "🛑 Shared Chrome stopped")
+        log_agent_action("Browser", "🛑 Chrome stopped")
