@@ -1,48 +1,58 @@
-# Freelance Project Search MVP
+# mvp-freelance-project-search
 
-Search and parse projects from freelance platforms with advanced filtering options.
+> Automated freelance project search — scrapes kwork.ru with Selenium, scores results, and surfaces the best matches via a REST API and Next.js UI.
+
+A Python agent logs into kwork.ru headlessly, runs configurable keyword searches, applies multi-factor filters (response rate, proposals count, time remaining), scores each project, and stores the results. The Next.js frontend polls the agent and displays live results. Deployed on Render.
 
 ## Features
 
-- Search projects by keywords (Cyrillic only)
-- Parse projects from URLs
-- Advanced filtering:
-  - Time left (hours)
-  - Hired percentage
-  - Maximum proposals
-- Real-time search results
-- Project evaluation and scoring
+- **Headless login** — Selenium-based authenticated session, no API key required
+- **Keyword search** — supports Cyrillic queries across project titles and descriptions
+- **Multi-factor filtering** — time left, hired %, max proposals cap
+- **Scoring engine** — ranks projects by relevance signal combination
+- **Live debug feed** — `/api/debug` streams the last 300 log lines and agent state
+- **Docker-ready** — `docker-compose.yml` for local and self-hosted deployment
 
-## API Endpoints
+## Tech Stack
 
-- `POST /api/projects/search` - Search projects with filters
-- `POST /api/projects/parse` - Parse project by URL
-- `GET /api/projects` - Get found projects
+| Layer | Technology |
+|-------|-----------|
+| Scraping agent | Python, Selenium, Chrome |
+| API | Next.js API routes |
+| Frontend | Next.js (Pages Router), React |
+| Deployment | Render (live), Vercel-compatible |
+| Container | Docker, docker-compose |
 
-## Debug / Logs
+## Getting Started
 
-`GET /api/debug` → https://kwork-ui.onrender.com/api/debug
+```bash
+# Copy env template and fill in credentials
+cp .env.example .env
 
-Возвращает последние 300 строк логов Python-сервиса и текущее состояние агента.
+# Start with Docker
+docker-compose up
 
-```json
-{
-  "agent_status": "waiting",
-  "driver_ready": true,
-  "logged_in": true,
-  "mode": "full",
-  "kwork_email_set": true,
-  "kwork_password_set": true,
-  "projects_in_memory": 3,
-  "logs": [
-    { "timestamp": "...", "level": "INFO", "message": "...", "module": "...", "function": "..." }
-  ]
-}
+# Or run locally
+npm install && npm run dev   # Next.js on :3000
+cd python && pip install -r requirements.txt && python agent.py
 ```
 
-Логи пишутся на каждый шаг поиска: получение запроса → setup_driver → login → пагинация → детали проектов → семантическая оценка → ответ.
+### Environment Variables
 
-## Note
+| Variable | Description |
+|----------|-------------|
+| `KWORK_EMAIL` | kwork.ru account email |
+| `KWORK_PASSWORD` | kwork.ru account password |
 
-This template uses mock data for demonstration. To connect to a real freelance platform API, update the API endpoints in `pages/api/projects/`.
+## API
 
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/projects/search` | POST | Search with keyword + filters |
+| `/api/projects/parse` | POST | Parse a single project URL |
+| `/api/projects` | GET | List cached results |
+| `/api/debug` | GET | Agent logs and status |
+
+## License
+
+MIT
