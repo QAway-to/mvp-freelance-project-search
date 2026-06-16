@@ -53,15 +53,68 @@ class AgentWorkzilla:
         self.driver.set_page_load_timeout(30)
         log_agent_action("Workzilla", "✅ [SELENIUM] Browser ready")
 
+    def _fetch_gdrive_file(self, file_id: str) -> str:
+        """Download plain text file from Google Drive (must be shared publicly)."""
+        import urllib.request
+        url = f"https://drive.google.com/uc?export=download&id={file_id}"
+        with urllib.request.urlopen(url, timeout=10) as r:
+            return r.read().decode("utf-8")
+
+    def _extract_magic_link(self, text: str) -> str | None:
+        """Extract Workzilla magic login link from email text."""
+        m = re.search(r'https://client\.work-zilla\.com/account/link-login\?[^\s>\]]+', text)
+        return m.group(0) if m else None
+
+    def _is_fresh(self, text: str, max_age_minutes: int = 25) -> bool:
+        """Check TIMESTAMP line is recent enough."""
+        m = re.search(r'TIMESTAMP:(.+)', text)
+        if not m:
+            return True  # no timestamp — assume fresh
+        from datetime import datetime, timezone
+        try:
+            ts = datetime.fromisoformat(m.group(1).strip())
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            age = (datetime.now(timezone.utc) - ts).total_seconds() / 60
+            return age <= max_age_minutes
+        except Exception:
+            return True
+
     def login(self) -> bool:
         if self.logged_in:
             return True
         if not self.driver:
             self.setup_driver()
 
+        # Try magic link auth via Google Drive file
+        file_id = os.getenv("GDRIVE_VERIFY_FILE_ID")
+        if file_id:
+            log_agent_action("Workzilla", "📧 [AUTH] Reading verification code from Google Drive...")
+            try:
+                content = self._fetch_gdrive_file(file_id)
+                if not self._is_fresh(content):
+                    log_agent_action("Workzilla", "⚠️ [AUTH] Drive file is stale (>25 min) — waiting for fresh code", level="WARNING")
+                    return False
+                magic_link = self._extract_magic_link(content)
+                if magic_link:
+                    log_agent_action("Workzilla", "🔗 [AUTH] Magic link found — navigating...")
+                    self.driver.get(magic_link)
+                    self._human_delay(2, 3)
+                    # Verify we're logged in by checking URL
+                    if "login" not in self.driver.current_url:
+                        log_agent_action("Workzilla", "✅ [AUTH] Logged in via magic link")
+                        self.logged_in = True
+                        return True
+                    log_agent_action("Workzilla", "⚠️ [AUTH] Magic link redirect failed", level="WARNING")
+                else:
+                    log_agent_action("Workzilla", "⚠️ [AUTH] No magic link found in Drive file", level="WARNING")
+            except Exception as e:
+                log_agent_action("Workzilla", f"⚠️ [AUTH] Drive read failed: {e}", level="WARNING")
+
+        # Fallback: cookie injection
         raw_cookies = os.getenv("WORKZILLA_COOKIES")
         if not raw_cookies:
-            log_agent_action("Workzilla", "❌ [AUTH] WORKZILLA_COOKIES not set", level="ERROR")
+            log_agent_action("Workzilla", "❌ [AUTH] No auth method available (GDRIVE_VERIFY_FILE_ID or WORKZILLA_COOKIES)", level="ERROR")
             return False
 
         try:
