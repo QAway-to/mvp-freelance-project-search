@@ -80,41 +80,105 @@ class AgentWorkzilla:
         except Exception:
             return True
 
+    def _trigger_login_email(self) -> bool:
+        """Open Workzilla login page, enter email, submit to trigger verification email."""
+        email = os.getenv("WORKZILLA_EMAIL")
+        if not email:
+            log_agent_action("Workzilla", "❌ [AUTH] WORKZILLA_EMAIL not set", level="ERROR")
+            return False
+
+        login_url = "https://client.work-zilla.com/account/login?ReturnUrl=%2Ffreelancer"
+        log_agent_action("Workzilla", f"🌐 [AUTH] Opening login page...")
+        self.driver.get(login_url)
+        self._human_delay(2, 3)
+
+        try:
+            field = None
+            for sel in ["input[type='email']", "input[name='email']", "input[name='Login']",
+                        "input[placeholder*='mail']", "input[placeholder*='почт']", "input.form-control"]:
+                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
+                if els:
+                    field = els[0]
+                    break
+
+            if not field:
+                log_agent_action("Workzilla", "❌ [AUTH] Email field not found", level="ERROR")
+                return False
+
+            field.clear()
+            field.send_keys(email)
+            self._human_delay(0.5, 1)
+
+            # Submit
+            for sel in ["button[type='submit']", "input[type='submit']", "button.btn-primary", "button.login-btn"]:
+                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
+                if els:
+                    self.driver.execute_script("arguments[0].click();", els[0])
+                    break
+
+            self._human_delay(1, 2)
+            log_agent_action("Workzilla", "📨 [AUTH] Login form submitted — waiting for email...")
+            return True
+
+        except Exception as e:
+            log_agent_action("Workzilla", f"❌ [AUTH] Login form error: {e}", level="ERROR")
+            return False
+
+    def _wait_for_magic_link(self, file_id: str, triggered_at: float, timeout: int = 90) -> str | None:
+        """Poll Google Drive file until a fresh magic link appears (after triggered_at)."""
+        from datetime import datetime, timezone
+        deadline = time.time() + timeout
+        attempt = 0
+        while time.time() < deadline:
+            attempt += 1
+            try:
+                content = self._fetch_gdrive_file(file_id)
+                ts_match = re.search(r'TIMESTAMP:(.+)', content)
+                if ts_match:
+                    ts = datetime.fromisoformat(ts_match.group(1).strip())
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    file_time = ts.timestamp()
+                    if file_time > triggered_at:
+                        link = self._extract_magic_link(content)
+                        if link:
+                            log_agent_action("Workzilla", f"✅ [AUTH] Magic link received after {attempt} polls")
+                            return link
+            except Exception as e:
+                log_agent_action("Workzilla", f"⚠️ [AUTH] Drive poll error: {e}", level="WARNING")
+            remaining = int(deadline - time.time())
+            log_agent_action("Workzilla", f"⏳ [AUTH] Waiting for email... ({remaining}s left)")
+            time.sleep(8)
+        return None
+
     def login(self) -> bool:
         if self.logged_in:
             return True
         if not self.driver:
             self.setup_driver()
 
-        # Try magic link auth via Google Drive file
         file_id = os.getenv("GDRIVE_VERIFY_FILE_ID")
-        if file_id:
-            log_agent_action("Workzilla", "📧 [AUTH] Reading verification code from Google Drive...")
-            try:
-                content = self._fetch_gdrive_file(file_id)
-                if not self._is_fresh(content):
-                    log_agent_action("Workzilla", "⚠️ [AUTH] Drive file is stale (>25 min) — waiting for fresh code", level="WARNING")
-                    return False
-                magic_link = self._extract_magic_link(content)
+        if file_id and os.getenv("WORKZILLA_EMAIL"):
+            triggered_at = time.time()
+            if self._trigger_login_email():
+                magic_link = self._wait_for_magic_link(file_id, triggered_at, timeout=90)
                 if magic_link:
-                    log_agent_action("Workzilla", "🔗 [AUTH] Magic link found — navigating...")
+                    log_agent_action("Workzilla", "🔗 [AUTH] Navigating to magic link...")
                     self.driver.get(magic_link)
                     self._human_delay(2, 3)
-                    # Verify we're logged in by checking URL
                     if "login" not in self.driver.current_url:
-                        log_agent_action("Workzilla", "✅ [AUTH] Logged in via magic link")
+                        log_agent_action("Workzilla", "✅ [AUTH] Logged in successfully")
                         self.logged_in = True
                         return True
-                    log_agent_action("Workzilla", "⚠️ [AUTH] Magic link redirect failed", level="WARNING")
+                    log_agent_action("Workzilla", "⚠️ [AUTH] Magic link navigation failed", level="WARNING")
                 else:
-                    log_agent_action("Workzilla", "⚠️ [AUTH] No magic link found in Drive file", level="WARNING")
-            except Exception as e:
-                log_agent_action("Workzilla", f"⚠️ [AUTH] Drive read failed: {e}", level="WARNING")
+                    log_agent_action("Workzilla", "❌ [AUTH] No magic link received within timeout", level="ERROR")
+            return False
 
         # Fallback: cookie injection
         raw_cookies = os.getenv("WORKZILLA_COOKIES")
         if not raw_cookies:
-            log_agent_action("Workzilla", "❌ [AUTH] No auth method available (GDRIVE_VERIFY_FILE_ID or WORKZILLA_COOKIES)", level="ERROR")
+            log_agent_action("Workzilla", "❌ [AUTH] Set GDRIVE_VERIFY_FILE_ID + WORKZILLA_EMAIL or WORKZILLA_COOKIES", level="ERROR")
             return False
 
         try:
@@ -126,7 +190,6 @@ class AgentWorkzilla:
 
         self.driver.get(BASE_URL)
         self._human_delay(1, 2)
-
         injected = 0
         for c in cookies:
             try:
@@ -139,7 +202,6 @@ class AgentWorkzilla:
                 injected += 1
             except Exception:
                 pass
-
         log_agent_action("Workzilla", f"🍪 [AUTH] Injected {injected}/{len(cookies)} cookies")
         self.logged_in = True
         return True
