@@ -28,6 +28,11 @@ export default function ProjectCard({ project, platform = 'kwork' }) {
   }
 
   async function handleGenerateCp() {
+    if (!project.description) {
+      setCpState('error')
+      setCpText('')
+      return
+    }
     setCpState('loading')
     setCpText('')
     setRespondState('idle')
@@ -137,7 +142,9 @@ export default function ProjectCard({ project, platform = 'kwork' }) {
       </div>
 
       {cpState === 'error' && (
-        <p className="cp-error">Ошибка генерации КП. Проверь OPENROUTER_API_KEY.</p>
+        <p className="cp-error">
+          {!project.description ? 'Нет описания — КП невозможно сгенерировать.' : 'Ошибка генерации КП. Проверь OPENROUTER_API_KEY.'}
+        </p>
       )}
 
       {cpState === 'done' && cpText && (
