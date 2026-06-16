@@ -24,18 +24,6 @@ export default function SearchTab({ onSearch, isLoading }) {
     <form onSubmit={handleSubmit}>
       <div className="form-group form-group-row">
         <div className="form-field-inline">
-          <label className="form-label-inline">бюджет от</label>
-          <input
-            type="number"
-            value={budgetMin}
-            onChange={(e) => setBudgetMin(e.target.value)}
-            placeholder="₽"
-            min="0"
-            className="form-input-inline"
-            disabled={isLoading}
-          />
-        </div>
-        <div className="form-field-inline">
           <label className="form-label-inline">time ≤</label>
           <input
             type="number"
