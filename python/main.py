@@ -10,6 +10,7 @@ import json
 
 from config import config
 from agents.agent_a import AgentA
+from agents.agent_workzilla import agent_workzilla
 from agents.search_params import SearchParams
 from telegram_bot import telegram_bot
 from utils.logger import setup_logging, log_queue, log_buffer, log_agent_action
@@ -206,6 +207,25 @@ async def api_search(request: Request):
 
     log_agent_action("API", f"[SEARCH] responding with {len(projects)} projects, total_time={time.time()-t0:.1f}s")
     return {"success": True, "data": projects, "meta": {"total": len(projects), "took_ms": round((time.time()-t0)*1000)}, "error": None}
+
+
+@app.post("/api/workzilla/search")
+async def workzilla_search(request: Request):
+    projects = await asyncio.to_thread(agent_workzilla.scrape_orders)
+    return {"success": True, "data": projects, "meta": {"total": len(projects)}, "error": None}
+
+
+@app.post("/api/workzilla/respond")
+async def workzilla_respond(request: Request):
+    data = await request.json()
+    url = (data.get("url") or "").strip()
+    cp_text = (data.get("cp_text") or "").strip()
+    if not url or not cp_text:
+        raise HTTPException(status_code=400, detail="url and cp_text required")
+    success = await asyncio.to_thread(agent_workzilla.submit_response, url, cp_text)
+    if success:
+        return {"success": True, "message": "Отклик отправлен"}
+    return JSONResponse({"success": False, "message": "Не удалось отправить отклик"}, status_code=422)
 
 
 @app.post("/api/respond")

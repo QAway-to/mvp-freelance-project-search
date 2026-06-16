@@ -2,33 +2,35 @@ import Head from 'next/head'
 import { useState } from 'react'
 import ProjectSearchForm from '../src/components/ProjectSearchForm'
 import LogMonitor from '../src/components/LogMonitor'
-import SearchHistory from '../src/components/SearchHistory'
 import { useLocalStorage } from '../src/hooks/useLocalStorage'
 
 const MAX_HISTORY = 10
 
 export default function Home() {
-  const [projects, setProjects] = useState([])
-  const [status, setStatus] = useState('waiting')
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState(null)
+  const [platform, setPlatform] = useState('kwork')
+
+  const [kworkProjects, setKworkProjects] = useState([])
+  const [kworkStatus, setKworkStatus] = useState('waiting')
+  const [kworkLoading, setKworkLoading] = useState(false)
+  const [kworkError, setKworkError] = useState(null)
+
+  const [wzProjects, setWzProjects] = useState([])
+  const [wzStatus, setWzStatus] = useState('waiting')
+  const [wzLoading, setWzLoading] = useState(false)
+  const [wzError, setWzError] = useState(null)
+
   const [searchHistory, setSearchHistory] = useLocalStorage('search_history', [])
 
-  const saveToHistory = (params, results) => {
-    const entry = {
-      id: Date.now(),
-      timestamp: new Date().toISOString(),
-      params,
-      projects: results,
-    }
-    setSearchHistory(prev => [entry, ...prev].slice(0, MAX_HISTORY))
-  }
+  const isLoading = platform === 'kwork' ? kworkLoading : wzLoading
+  const status = platform === 'kwork' ? kworkStatus : wzStatus
+  const projects = platform === 'kwork' ? kworkProjects : wzProjects
+  const error = platform === 'kwork' ? kworkError : wzError
 
-  const handleSearch = async (searchParams) => {
-    setIsLoading(true)
-    setError(null)
-    setStatus('running')
-    setProjects([])
+  const handleKworkSearch = async (searchParams) => {
+    setKworkLoading(true)
+    setKworkError(null)
+    setKworkStatus('running')
+    setKworkProjects([])
 
     try {
       const response = await fetch('/api/projects/search', {
@@ -39,26 +41,57 @@ export default function Home() {
       const data = await response.json()
 
       if (data.status === 'success') {
-        const results = data.projects || []
-        setProjects(results)
-        setStatus('success')
-        saveToHistory(searchParams, results)
+        setKworkProjects(data.projects || [])
+        setKworkStatus('success')
+        setSearchHistory(prev => [{
+          id: Date.now(), timestamp: new Date().toISOString(),
+          params: { ...searchParams, platform: 'kwork' },
+          projects: data.projects || [],
+        }, ...prev].slice(0, MAX_HISTORY))
       } else {
-        setError(data.message || 'search failed')
-        setStatus('error')
+        setKworkError(data.message || 'search failed')
+        setKworkStatus('error')
       }
     } catch (err) {
-      setError(err.message || 'network error')
-      setStatus('error')
+      setKworkError(err.message || 'network error')
+      setKworkStatus('error')
     } finally {
-      setIsLoading(false)
+      setKworkLoading(false)
+    }
+  }
+
+  const handleWzSearch = async () => {
+    setWzLoading(true)
+    setWzError(null)
+    setWzStatus('running')
+    setWzProjects([])
+
+    try {
+      const response = await fetch('/api/workzilla/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      const data = await response.json()
+
+      if (data.status === 'success') {
+        setWzProjects(data.projects || [])
+        setWzStatus('success')
+      } else {
+        setWzError(data.message || 'search failed')
+        setWzStatus('error')
+      }
+    } catch (err) {
+      setWzError(err.message || 'network error')
+      setWzStatus('error')
+    } finally {
+      setWzLoading(false)
     }
   }
 
   const handleParseUrl = async (url) => {
-    setIsLoading(true)
-    setError(null)
-    setStatus('running')
+    setKworkLoading(true)
+    setKworkError(null)
+    setKworkStatus('running')
 
     try {
       const response = await fetch('/api/projects/parse', {
@@ -69,17 +102,17 @@ export default function Home() {
       const data = await response.json()
 
       if (data.status === 'success') {
-        setProjects([data.project])
-        setStatus('success')
+        setKworkProjects([data.project])
+        setKworkStatus('success')
       } else {
-        setError(data.message || 'failed to parse project')
-        setStatus('error')
+        setKworkError(data.message || 'failed to parse project')
+        setKworkStatus('error')
       }
     } catch (err) {
-      setError(err.message || 'network error')
-      setStatus('error')
+      setKworkError(err.message || 'network error')
+      setKworkStatus('error')
     } finally {
-      setIsLoading(false)
+      setKworkLoading(false)
     }
   }
 
@@ -93,29 +126,52 @@ export default function Home() {
       <main className="page">
         <header className="page-header">
           <h1>freelance_search</h1>
-          <p className="subtitle">// kwork.ru · keyword + url parser · v1.0</p>
+          <p className="subtitle">// kwork · workzilla · url parser · v1.1</p>
         </header>
 
+        <div className="platform-tabs">
+          <button
+            type="button"
+            className={`platform-tab ${platform === 'kwork' ? 'platform-tab-active' : ''}`}
+            onClick={() => setPlatform('kwork')}
+          >
+            kwork
+          </button>
+          <button
+            type="button"
+            className={`platform-tab ${platform === 'workzilla' ? 'platform-tab-active' : ''}`}
+            onClick={() => setPlatform('workzilla')}
+          >
+            workzilla
+          </button>
+        </div>
+
         <div className="card">
-          <ProjectSearchForm
-            onSearch={handleSearch}
-            onParseUrl={handleParseUrl}
-            isLoading={isLoading}
-            status={status}
-            projects={projects}
-          />
+          {platform === 'kwork' ? (
+            <ProjectSearchForm
+              onSearch={handleKworkSearch}
+              onParseUrl={handleParseUrl}
+              isLoading={kworkLoading}
+              status={kworkStatus}
+              projects={kworkProjects}
+              platform="kwork"
+            />
+          ) : (
+            <ProjectSearchForm
+              onSearch={handleWzSearch}
+              onParseUrl={null}
+              isLoading={wzLoading}
+              status={wzStatus}
+              projects={wzProjects}
+              platform="workzilla"
+            />
+          )}
           {error && (
             <div className="alert alert-error">// {error}</div>
           )}
         </div>
 
         <LogMonitor isActive={isLoading} />
-
-        <SearchHistory
-          history={searchHistory}
-          onRerun={handleSearch}
-          onClear={() => setSearchHistory([])}
-        />
       </main>
     </>
   )

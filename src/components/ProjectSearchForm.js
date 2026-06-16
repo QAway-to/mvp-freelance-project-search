@@ -10,11 +10,10 @@ const STATUS_MAP = {
   error:   { cls: 'dot-error',   label: 'error' },
 }
 
-export default function ProjectSearchForm({ onSearch, onParseUrl, isLoading, status, projects = [] }) {
+export default function ProjectSearchForm({ onSearch, onParseUrl, isLoading, status, projects = [], platform = 'kwork' }) {
   const [activeTab, setActiveTab] = useState('search')
   const dot = STATUS_MAP[status] || STATUS_MAP.waiting
 
-  // Auto-switch to responses tab the moment search starts
   useEffect(() => {
     if (isLoading) setActiveTab('responses')
   }, [isLoading])
@@ -30,14 +29,16 @@ export default function ProjectSearchForm({ onSearch, onParseUrl, isLoading, sta
         >
           search
         </button>
-        <button
-          type="button"
-          className={`tab ${activeTab === 'url' ? 'tab-active' : ''}`}
-          onClick={() => setActiveTab('url')}
-          disabled={isLoading}
-        >
-          url
-        </button>
+        {platform === 'kwork' && (
+          <button
+            type="button"
+            className={`tab ${activeTab === 'url' ? 'tab-active' : ''}`}
+            onClick={() => setActiveTab('url')}
+            disabled={isLoading}
+          >
+            url
+          </button>
+        )}
         <button
           type="button"
           className={`tab ${activeTab === 'responses' ? 'tab-active' : ''}`}
@@ -67,7 +68,7 @@ export default function ProjectSearchForm({ onSearch, onParseUrl, isLoading, sta
               </span>
             </div>
           )
-          : <ProjectResults projects={projects} />
+          : <ProjectResults projects={projects} platform={platform} />
       )}
     </div>
   )

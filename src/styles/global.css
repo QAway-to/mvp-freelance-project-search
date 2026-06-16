@@ -610,6 +610,33 @@ a {
   flex-shrink: 0;
 }
 
+/* ── PLATFORM TABS ── */
+.platform-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 16px;
+}
+
+.platform-tab {
+  padding: 6px 20px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.platform-tab:hover { color: var(--text-muted); border-color: var(--border-active); }
+
+.platform-tab-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 /* ── CP SECTION ── */
 .cp-section {
   margin-top: 14px;

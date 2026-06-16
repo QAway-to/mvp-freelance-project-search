@@ -1,0 +1,19 @@
+const { submitWorkzillaRespond } = require('../../../lib/pythonClient')
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' })
+  }
+
+  const { url, cp_text } = req.body
+  if (!url || !cp_text) {
+    return res.status(400).json({ success: false, message: 'url and cp_text required' })
+  }
+
+  const result = await submitWorkzillaRespond({ url, cp_text })
+  if (!result.success) {
+    return res.status(422).json({ success: false, message: result.message || 'Failed' })
+  }
+
+  return res.status(200).json({ success: true })
+}

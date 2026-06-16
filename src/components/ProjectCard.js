@@ -2,7 +2,7 @@ import { useState } from 'react'
 
 const TRUNCATE_LEN = 150
 
-export default function ProjectCard({ project }) {
+export default function ProjectCard({ project, platform = 'kwork' }) {
   const hasLongDesc = project.description && project.description.length > TRUNCATE_LEN
   const [isExpanded, setIsExpanded] = useState(!hasLongDesc)
   const [copied, setCopied] = useState(false)
@@ -61,7 +61,8 @@ export default function ProjectCard({ project }) {
     if (respondState === 'confirm') {
       setRespondState('sending')
       try {
-        const res = await fetch('/api/projects/respond', {
+        const endpoint = platform === 'workzilla' ? '/api/workzilla/respond' : '/api/projects/respond'
+        const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ url: project.url, cp_text: cpText }),
