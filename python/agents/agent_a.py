@@ -6,7 +6,6 @@ import os
 from datetime import datetime
 from typing import List, Dict, Any
 import aiohttp
-import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -14,6 +13,7 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from urllib.parse import quote_plus
 
 from agents.search_params import SearchParams
+from browser import get_driver
 
 from config import config
 from utils.logger import logger, log_agent_action
@@ -33,44 +33,15 @@ class AgentA:
         self.session_steps: List[Dict[str, Any]] = []
 
     def setup_driver(self):
-        """Setup undetected-chromedriver browser"""
-        log_agent_action("Agent A", "🔧 [SELENIUM] Starting browser setup (undetected-chromedriver)...")
-
+        """Acquire the shared Chrome instance."""
+        log_agent_action("Agent A", "🔧 [SELENIUM] Acquiring shared browser...")
         if config.MODE == "demo":
             log_agent_action("Agent A", "🔧 [SELENIUM] Demo mode: skipping browser setup")
             self.driver = None
             return
-
-        options = uc.ChromeOptions()
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--window-size=1920,1080")
-        options.add_argument("--mute-audio")
-        options.add_argument("--disable-background-networking")
-        options.add_argument("--disable-default-apps")
-        options.add_argument("--no-first-run")
-
-        # Chrome binary (Render provides GOOGLE_CHROME_BIN)
-        chrome_bin = os.getenv("CHROME_BIN") or os.getenv("GOOGLE_CHROME_BIN")
-        if not chrome_bin:
-            for path in ["/usr/bin/google-chrome-stable", "/usr/bin/google-chrome", "/usr/bin/chromium"]:
-                if os.path.exists(path):
-                    chrome_bin = path
-                    break
-        if chrome_bin:
-            log_agent_action("Agent A", f"🔧 [SELENIUM] Chrome binary: {chrome_bin}")
-
-        log_agent_action("Agent A", "🔧 [SELENIUM] Initializing undetected Chrome driver...")
         try:
-            self.driver = uc.Chrome(
-                options=options,
-                browser_executable_path=chrome_bin,
-                headless=True,
-                use_subprocess=False,
-            )
-            self.driver.set_page_load_timeout(30)
-            log_agent_action("Agent A", "✅ [SELENIUM] Browser setup complete")
+            self.driver = get_driver()
+            log_agent_action("Agent A", "✅ [SELENIUM] Shared browser acquired")
         except Exception as e:
             log_agent_action("Agent A", f"❌ [SELENIUM] Driver setup failed: {str(e)[:300]}", level="ERROR")
             raise
@@ -1010,17 +981,11 @@ class AgentA:
             return False
 
     async def stop(self):
-        """Stop the agent"""
+        """Stop the agent (shared browser is managed by browser.py)."""
         log_agent_action("Agent A", "Stopping agent")
         self.running = False
         self.status = "stopped"
-
-        if self.driver:
-            try:
-                self.driver.quit()
-                self.driver = None
-            except Exception as e:
-                log_agent_action("Agent A", f"Error closing driver: {e}")
+        self.driver = None
 
 
 agent_a_instance = None  # set by main.py after instantiation

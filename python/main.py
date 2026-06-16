@@ -13,6 +13,7 @@ from agents.agent_a import AgentA
 from agents.agent_workzilla import agent_workzilla
 from agents.search_params import SearchParams
 from telegram_bot import telegram_bot
+from browser import quit_driver
 from utils.logger import setup_logging, log_queue, log_buffer, log_agent_action
 
 setup_logging()
@@ -28,6 +29,7 @@ async def lifespan(app: FastAPI):
     await telegram_bot.start()
     yield
     await telegram_bot.stop()
+    quit_driver()
 
 
 app = FastAPI(title="Freelance Agent A", lifespan=lifespan)

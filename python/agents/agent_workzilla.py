@@ -6,12 +6,12 @@ import json
 import asyncio
 from typing import List, Dict, Any
 
-import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
+from browser import get_driver
 from config import config
 from utils.logger import log_agent_action
 
@@ -29,29 +29,9 @@ class AgentWorkzilla:
         time.sleep(random.uniform(lo, hi))
 
     def setup_driver(self):
-        log_agent_action("Workzilla", "🔧 [SELENIUM] Starting browser...")
-        options = uc.ChromeOptions()
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--window-size=1920,1080")
-        options.add_argument("--mute-audio")
-
-        chrome_bin = os.getenv("CHROME_BIN") or os.getenv("GOOGLE_CHROME_BIN")
-        if not chrome_bin:
-            for path in ["/usr/bin/google-chrome-stable", "/usr/bin/google-chrome", "/usr/bin/chromium"]:
-                if os.path.exists(path):
-                    chrome_bin = path
-                    break
-
-        self.driver = uc.Chrome(
-            options=options,
-            browser_executable_path=chrome_bin,
-            headless=True,
-            use_subprocess=False,
-        )
-        self.driver.set_page_load_timeout(30)
-        log_agent_action("Workzilla", "✅ [SELENIUM] Browser ready")
+        log_agent_action("Workzilla", "🔧 [SELENIUM] Acquiring shared browser...")
+        self.driver = get_driver()
+        log_agent_action("Workzilla", "✅ [SELENIUM] Shared browser acquired")
 
     def _fetch_gdrive_file(self, file_id: str) -> str:
         """Download plain text file from Google Drive (must be shared publicly)."""
@@ -359,12 +339,7 @@ class AgentWorkzilla:
             return False
 
     async def stop(self):
-        if self.driver:
-            try:
-                self.driver.quit()
-                self.driver = None
-            except Exception:
-                pass
+        self.driver = None
         self.status = "stopped"
 
 
