@@ -15,6 +15,8 @@ from agents.search_params import SearchParams
 from telegram_bot import telegram_bot
 from browser import quit_driver
 from utils.logger import setup_logging, log_queue, log_buffer, log_agent_action
+from utils.categorizer import categorize
+from utils.sheets_writer import write_order
 
 setup_logging()
 
@@ -140,6 +142,16 @@ async def get_projects():
     return {"total": len(agent_a.found_projects), "suitable": suitable_count, "projects": agent_a.found_projects}
 
 
+async def _categorize_and_save(projects: list):
+    """Background: categorize each project and write to Google Sheets."""
+    for p in projects:
+        try:
+            cat = await categorize(p.get("title", ""), p.get("description", ""))
+            await write_order(p, cat["category"], cat["tags"], cat["complexity"])
+        except Exception as e:
+            log_agent_action("Sheets", f"⚠️ Pipeline error: {e}", level="WARNING")
+
+
 @app.post("/agent/generate-cp")
 async def generate_cp(request: Request):
     data = await request.json()
@@ -209,12 +221,14 @@ async def api_search(request: Request):
         projects = [p for p in projects if p.get("proposals") is None or p.get("proposals", 0) <= proposals_max]
 
     log_agent_action("API", f"[SEARCH] responding with {len(projects)} projects, total_time={time.time()-t0:.1f}s")
+    asyncio.create_task(_categorize_and_save(projects))
     return {"success": True, "data": projects, "meta": {"total": len(projects), "took_ms": round((time.time()-t0)*1000)}, "error": None}
 
 
 @app.post("/api/workzilla/search")
 async def workzilla_search(request: Request):
     projects = await asyncio.to_thread(agent_workzilla.scrape_orders)
+    asyncio.create_task(_categorize_and_save(projects))
     return {"success": True, "data": projects, "meta": {"total": len(projects)}, "error": None}
 
 
