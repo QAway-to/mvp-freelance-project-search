@@ -221,7 +221,6 @@ async def api_search(request: Request):
         projects = [p for p in projects if p.get("proposals") is None or p.get("proposals", 0) <= proposals_max]
 
     log_agent_action("API", f"[SEARCH] responding with {len(projects)} projects, total_time={time.time()-t0:.1f}s")
-    asyncio.create_task(_categorize_and_save(projects))
     return {"success": True, "data": projects, "meta": {"total": len(projects), "took_ms": round((time.time()-t0)*1000)}, "error": None}
 
 
