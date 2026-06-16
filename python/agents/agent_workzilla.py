@@ -124,31 +124,53 @@ class AgentWorkzilla:
             log_agent_action("Workzilla", f"❌ [AUTH] Login form error: {e}", level="ERROR")
             return False
 
-    def _wait_for_magic_link(self, file_id: str, triggered_at: float, timeout: int = 90) -> str | None:
-        """Poll Google Drive file until a fresh magic link appears (after triggered_at)."""
+    def _wait_for_magic_link(self, file_id: str, triggered_at: float, timeout: int = 120) -> str | None:
+        """Poll Google Drive file until a fresh magic link appears."""
         from datetime import datetime, timezone
         deadline = time.time() + timeout
+        last_seen_link = None
+
+        # Read whatever is in the file right now (before our trigger)
+        try:
+            content = self._fetch_gdrive_file(file_id)
+            last_seen_link = self._extract_magic_link(content)
+        except Exception:
+            pass
+
         attempt = 0
         while time.time() < deadline:
             attempt += 1
+            time.sleep(8)
             try:
                 content = self._fetch_gdrive_file(file_id)
+
+                # Try timestamp-based freshness first
                 ts_match = re.search(r'TIMESTAMP:(.+)', content)
                 if ts_match:
-                    ts = datetime.fromisoformat(ts_match.group(1).strip())
-                    if ts.tzinfo is None:
-                        ts = ts.replace(tzinfo=timezone.utc)
-                    file_time = ts.timestamp()
-                    if file_time > triggered_at:
-                        link = self._extract_magic_link(content)
-                        if link:
-                            log_agent_action("Workzilla", f"✅ [AUTH] Magic link received after {attempt} polls")
-                            return link
+                    try:
+                        ts = datetime.fromisoformat(ts_match.group(1).strip())
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=timezone.utc)
+                        if ts.timestamp() > triggered_at:
+                            link = self._extract_magic_link(content)
+                            if link:
+                                log_agent_action("Workzilla", f"✅ [AUTH] Fresh link via timestamp (poll {attempt})")
+                                return link
+                    except Exception:
+                        pass
+
+                # Fallback: detect link change (no TIMESTAMP in file)
+                link = self._extract_magic_link(content)
+                if link and link != last_seen_link:
+                    log_agent_action("Workzilla", f"✅ [AUTH] New magic link detected (poll {attempt})")
+                    return link
+
             except Exception as e:
                 log_agent_action("Workzilla", f"⚠️ [AUTH] Drive poll error: {e}", level="WARNING")
+
             remaining = int(deadline - time.time())
             log_agent_action("Workzilla", f"⏳ [AUTH] Waiting for email... ({remaining}s left)")
-            time.sleep(8)
+
         return None
 
     def login(self) -> bool:
@@ -206,7 +228,7 @@ class AgentWorkzilla:
         self.logged_in = True
         return True
 
-    def scrape_orders(self) -> List[Dict[str, Any]]:
+    def scrape_orders(self, limit: int = 10) -> List[Dict[str, Any]]:
         if not self.logged_in:
             if not self.login():
                 return []
@@ -215,86 +237,64 @@ class AgentWorkzilla:
         self.driver.get(ORDERS_URL)
         self._human_delay(2, 4)
 
-        # Collect all order links
-        links = self.driver.find_elements(By.CSS_SELECTOR, "a.order-in-list-link")
-        hrefs = []
-        for el in links:
-            href = el.get_attribute("href")
-            if href:
-                hrefs.append(href if href.startswith("http") else BASE_URL + href)
+        # Check we're actually logged in (not redirected to login page)
+        if "login" in self.driver.current_url:
+            log_agent_action("Workzilla", "⚠️ [SCRAPE] Session expired — re-authenticating...", level="WARNING")
+            self.logged_in = False
+            if not self.login():
+                return []
+            self.driver.get(ORDERS_URL)
+            self._human_delay(2, 4)
 
-        log_agent_action("Workzilla", f"📋 [SCRAPE] Found {len(hrefs)} order links")
+        cards = self.driver.find_elements(By.CSS_SELECTOR, ".order-header")
+        log_agent_action("Workzilla", f"📋 [SCRAPE] Found {len(cards)} cards on page, taking first {limit}")
 
         projects = []
-        for i, href in enumerate(hrefs):
+        links = self.driver.find_elements(By.CSS_SELECTOR, "a.order-in-list-link")
+
+        for i, (card, link) in enumerate(zip(cards[:limit], links[:limit])):
             try:
-                project = self._scrape_order_page(href, i + 1, len(hrefs))
-                if project:
-                    projects.append(project)
+                href = link.get_attribute("href") or ""
+                url = href if href.startswith("http") else BASE_URL + href
+                order_id = re.search(r'/freelancer/(\d+)', url)
+                order_id = order_id.group(1) if order_id else str(i)
+
+                title = ""
+                for sel in [".title .text-wrapper", ".title-container .text-wrapper"]:
+                    els = card.find_elements(By.CSS_SELECTOR, sel)
+                    if els and els[0].text.strip():
+                        title = els[0].text.strip()
+                        break
+
+                budget = ""
+                els = card.find_elements(By.CSS_SELECTOR, ".price-order-in-list .param-title")
+                if els:
+                    budget = els[0].text.strip() + " ₽"
+
+                time_left = ""
+                els = card.find_elements(By.CSS_SELECTOR, ".time-title")
+                if els:
+                    time_left = els[0].text.strip()
+
+                if not title:
+                    continue
+
+                projects.append({
+                    "id": order_id,
+                    "title": title,
+                    "description": "",
+                    "budget": budget,
+                    "url": url,
+                    "timeLeft": time_left,
+                    "proposals": None,
+                    "hired": None,
+                    "platform": "workzilla",
+                })
             except Exception as e:
-                log_agent_action("Workzilla", f"⚠️ [SCRAPE] Error on {href}: {e}", level="WARNING")
-            self._human_delay(1.5, 3)
+                log_agent_action("Workzilla", f"⚠️ [SCRAPE] Card {i+1} error: {e}", level="WARNING")
 
         log_agent_action("Workzilla", f"✅ [SCRAPE] Collected {len(projects)} projects")
         return projects
-
-    def _scrape_order_page(self, url: str, idx: int, total: int) -> Dict[str, Any] | None:
-        log_agent_action("Workzilla", f"🔗 [SCRAPE] {idx}/{total} {url}")
-        self.driver.get(url)
-        self._human_delay(1.5, 3)
-
-        # Extract order ID from URL
-        m = re.search(r'/freelancer/(\d+)', url)
-        order_id = m.group(1) if m else "unknown"
-
-        try:
-            title = ""
-            for sel in [".title .text-wrapper", ".title-container .text-wrapper", "h3.title", "h1"]:
-                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
-                if els and els[0].text.strip():
-                    title = els[0].text.strip()
-                    break
-
-            budget = ""
-            for sel in [".price-order-in-list .param-title", ".order-money-icon .param-title", ".param-title"]:
-                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
-                if els and els[0].text.strip():
-                    budget = els[0].text.strip() + " ₽"
-                    break
-
-            time_left = ""
-            for sel in [".time-title", ".order-time-container .time-title"]:
-                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
-                if els and els[0].text.strip():
-                    time_left = els[0].text.strip()
-                    break
-
-            description = ""
-            for sel in [".external-links-wrapper span", ".order-description", ".description span", ".description"]:
-                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
-                if els:
-                    texts = [e.text.strip() for e in els if e.text.strip()]
-                    if texts:
-                        description = "\n".join(texts)
-                        break
-
-            if not title:
-                return None
-
-            return {
-                "id": order_id,
-                "title": title,
-                "description": description,
-                "budget": budget,
-                "url": url,
-                "timeLeft": time_left,
-                "proposals": None,
-                "hired": None,
-                "platform": "workzilla",
-            }
-        except Exception as e:
-            log_agent_action("Workzilla", f"❌ [SCRAPE] Extraction error: {e}", level="ERROR")
-            return None
 
     def submit_response(self, url: str, cp_text: str) -> bool:
         if not self.logged_in:
