@@ -488,10 +488,25 @@ class AgentA:
 
             for card in project_cards:
                 try:
-                    # Urgency check — matches original working logic from 81b8c6a
-                    urgency_element = card.find_element(By.CSS_SELECTOR, ".want-card__informers-row span.mr8")
-                    urgency_text = urgency_element.text.strip()
-                    urgency_hours = self.parse_urgency(urgency_text)
+                    # Urgency check — resilient: if selector not found, treat as no deadline
+                    urgency_text = ""
+                    urgency_hours = 999.0
+                    for _u_sel in [
+                        ".want-card__informers-row span.mr8",
+                        ".want-card__informers-row span",
+                        "[class*='informers'] span",
+                        "[class*='deadline']",
+                        "[class*='urgency']",
+                    ]:
+                        _u_els = card.find_elements(By.CSS_SELECTOR, _u_sel)
+                        for _u_el in _u_els:
+                            _t = _u_el.text.strip()
+                            if "Осталось" in _t or "ч." in _t or "мин." in _t:
+                                urgency_text = _t
+                                urgency_hours = self.parse_urgency(_t)
+                                break
+                        if urgency_text:
+                            break
 
                     if urgency_hours > params.max_urgency_hours:
                         _skipped_urgency += 1
