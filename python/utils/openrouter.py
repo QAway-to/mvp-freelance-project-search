@@ -3,7 +3,7 @@ from config import config
 from utils.logger import log_agent_action
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = "meta-llama/llama-3.1-8b-instruct:free"
+MODEL = "openai/gpt-oss-120b:free"
 
 
 async def chat_completion(messages: list[dict], timeout: int = 60) -> str:
