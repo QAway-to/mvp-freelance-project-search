@@ -151,7 +151,7 @@ class AgentWorkzilla:
 
     # ── Scraping ──────────────────────────────────────────────────────────────
 
-    def scrape_orders(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def scrape_orders(self, limit: int = 100) -> List[Dict[str, Any]]:
         with self._lock:
             return self._scrape_orders_locked(limit)
 
