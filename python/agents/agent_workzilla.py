@@ -6,6 +6,7 @@ import threading
 from typing import List, Dict, Any
 
 from selenium.webdriver.common.by import By
+from selenium.common.exceptions import TimeoutException
 
 from browser import create_driver
 from config import config
@@ -130,7 +131,10 @@ class AgentWorkzilla:
                 return False
 
             log_agent_action("Workzilla", "🔗 [AUTH] Navigating to magic link...")
-            self.driver.get(magic_link)
+            try:
+                self.driver.get(magic_link)
+            except TimeoutException:
+                log_agent_action("Workzilla", "⚠️ [AUTH] Page load timeout on magic link — checking auth state...", level="WARNING")
             self._human_delay(2, 3)
 
             if "login" in self.driver.current_url:
@@ -159,7 +163,10 @@ class AgentWorkzilla:
                 return []
 
         log_agent_action("Workzilla", f"🌐 [SCRAPE] Loading {ORDERS_URL}")
-        self.driver.get(ORDERS_URL)
+        try:
+            self.driver.get(ORDERS_URL)
+        except TimeoutException:
+            log_agent_action("Workzilla", "⚠️ [SCRAPE] Page load timeout — checking state...", level="WARNING")
         self._human_delay(2, 4)
 
         if "login" in self.driver.current_url:
@@ -167,7 +174,10 @@ class AgentWorkzilla:
             self.logged_in = False
             if not self.login():
                 return []
-            self.driver.get(ORDERS_URL)
+            try:
+                self.driver.get(ORDERS_URL)
+            except TimeoutException:
+                log_agent_action("Workzilla", "⚠️ [SCRAPE] Page load timeout on retry — checking state...", level="WARNING")
             self._human_delay(2, 4)
 
         # Count cards and links (found separately — they are siblings, not nested)

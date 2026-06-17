@@ -17,6 +17,7 @@ def _build_options() -> uc.ChromeOptions:
     options.add_argument("--disable-background-networking")
     options.add_argument("--disable-default-apps")
     options.add_argument("--no-first-run")
+    options.page_load_strategy = "eager"
     return options
 
 
