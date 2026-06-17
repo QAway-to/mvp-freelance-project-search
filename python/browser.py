@@ -30,12 +30,22 @@ def _chrome_bin() -> str | None:
 
 def create_driver():
     """Create a fresh Chrome instance. Caller must call .quit() when done."""
-    log_agent_action("Browser", "🔧 Starting Chrome...")
-    driver = uc.Chrome(
-        options=_build_options(),
-        browser_executable_path=_chrome_bin(),
-        headless=True,
-    )
+    chrome_bin = _chrome_bin()
+    log_agent_action("Browser", f"🔧 Starting Chrome... binary={chrome_bin}")
+    try:
+        driver = uc.Chrome(
+            options=_build_options(),
+            browser_executable_path=chrome_bin,
+            headless=True,
+        )
+    except Exception as e:
+        log_agent_action("Browser", f"❌ Chrome failed: {e}", level="ERROR")
+        # Try without specifying binary — let uc find Chrome itself
+        log_agent_action("Browser", "🔧 Retrying without explicit binary path...")
+        driver = uc.Chrome(
+            options=_build_options(),
+            headless=True,
+        )
     driver.set_page_load_timeout(30)
     log_agent_action("Browser", "✅ Chrome ready")
     return driver
