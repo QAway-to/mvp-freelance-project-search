@@ -1,5 +1,6 @@
 import os
 import aiohttp
+from urllib.parse import quote
 from utils.logger import log_agent_action
 
 _URL    = os.getenv("SHEETS_SCRIPT_URL", "")
@@ -22,7 +23,7 @@ async def write_order(project: dict, category: str, tags: list, complexity: str)
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                f"{_URL}?secret={_SECRET}",
+                f"{_URL}?secret={quote(_SECRET, safe='')}",
                 json=payload,
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as resp:
