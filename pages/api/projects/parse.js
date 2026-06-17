@@ -1,9 +1,12 @@
+const { requireAuth } = require('../../../../lib/auth')
 const { parseProject } = require('../../../lib/pythonClient')
 const { normalizeProject } = require('../../../lib/normalizers')
 
 const KWORK_URL_PATTERN = /^https:\/\/kwork\.ru\/projects\/(\d+)\/view$/
 
 export default async function handler(req, res) {
+  if (requireAuth(req, res)) return
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
@@ -40,8 +43,5 @@ export default async function handler(req, res) {
     })
   }
 
-  return res.status(200).json({
-    status: 'success',
-    project: normalizeProject(result.data),
-  })
+  return res.status(200).json({ status: 'success', project: normalizeProject(result.data) })
 }
