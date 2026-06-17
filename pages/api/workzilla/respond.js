@@ -1,4 +1,4 @@
-const { requireAuth } = require('../../../../lib/auth')
+const { requireAuth } = require('../../../lib/auth')
 const { submitWorkzillaRespond } = require('../../../lib/pythonClient')
 
 export default async function handler(req, res) {
