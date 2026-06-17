@@ -1,6 +1,9 @@
+const { requireAuth } = require('../../../../lib/auth')
 const PYTHON_API_URL = process.env.PYTHON_API_URL
 
 export default async function handler(req, res) {
+  if (requireAuth(req, res)) return
+
   if (req.method !== 'GET') {
     return res.status(405).end()
   }
