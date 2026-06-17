@@ -1,4 +1,4 @@
-const { requireAuth } = require('../../../../lib/auth')
+const { requireAuth } = require('../../../lib/auth')
 const { searchProjects } = require('../../../lib/pythonClient')
 const { normalizeProject } = require('../../../lib/normalizers')
 
@@ -23,10 +23,7 @@ export default async function handler(req, res) {
       result.error === 'UPSTREAM_TIMEOUT' ? 504
       : result.error === 'UPSTREAM_NOT_CONFIGURED' ? 503
       : 502
-    return res.status(statusCode).json({
-      status: 'error',
-      message: result.error || 'Search failed',
-    })
+    return res.status(statusCode).json({ status: 'error', message: result.error || 'Search failed' })
   }
 
   const projects = (result.data || []).map(normalizeProject)
