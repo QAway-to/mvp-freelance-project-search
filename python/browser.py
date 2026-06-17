@@ -15,10 +15,6 @@ def _build_options() -> uc.ChromeOptions:
     options.add_argument("--disable-background-networking")
     options.add_argument("--disable-default-apps")
     options.add_argument("--no-first-run")
-    options.add_argument("--disable-extensions")
-    options.add_argument("--blink-settings=imagesEnabled=false")
-    options.add_argument("--js-flags=--max-old-space-size=256")
-    options.add_argument("--disable-features=TranslateUI,AutofillServerCommunication")
     return options
 
 
