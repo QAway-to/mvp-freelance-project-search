@@ -1,7 +1,7 @@
 import { useLogStream } from '../hooks/useLogStream'
 
-export default function LogMonitor({ isActive }) {
-  const { progress, lastMsg } = useLogStream(isActive)
+export default function LogMonitor({ isActive, password = '' }) {
+  const { progress, lastMsg } = useLogStream(isActive, password)
 
   if (!isActive && !lastMsg) return null
 
