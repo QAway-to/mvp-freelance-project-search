@@ -180,105 +180,86 @@ class AgentWorkzilla:
                 log_agent_action("Workzilla", "⚠️ [SCRAPE] Page load timeout on retry — checking state...", level="WARNING")
             self._human_delay(2, 4)
 
-        # Count cards and links (found separately — they are siblings, not nested)
-        initial_headers = self.driver.find_elements(By.CSS_SELECTOR, ".order-header")
-        initial_links = self.driver.find_elements(By.CSS_SELECTOR, "a.order-in-list-link")
-        count = min(limit, len(initial_headers), len(initial_links))
-        log_agent_action("Workzilla", f"📋 [SCRAPE] Found {len(initial_headers)} headers / {len(initial_links)} links, processing {count}")
+        # Step 1: count available cards
+        total_links = self.driver.execute_script(
+            "return document.querySelectorAll('a.order-in-list-link').length"
+        )
+        count = min(limit, total_links)
+        log_agent_action("Workzilla", f"📋 [SCRAPE] Found {total_links} links, expanding {count}")
 
         if count == 0:
             log_agent_action("Workzilla", "⚠️ [SCRAPE] No cards found on page", level="WARNING")
             return []
 
+        # Step 2: click all cards at once via JS, then wait for DOM to settle
+        self.driver.execute_script("""
+            var links = document.querySelectorAll('a.order-in-list-link');
+            for (var i = 0; i < Math.min(arguments[0], links.length); i++) {
+                links[i].click();
+            }
+        """, count)
+        log_agent_action("Workzilla", f"📋 [SCRAPE] Clicked {count} cards, waiting for expand...")
+        time.sleep(4)
+
+        # Step 3: extract all data in one JS call
+        raw_cards = self.driver.execute_script("""
+            var headers = document.querySelectorAll('.order-header');
+            var links   = document.querySelectorAll('a.order-in-list-link');
+            var n = Math.min(arguments[0], headers.length, links.length);
+            var results = [];
+            for (var i = 0; i < n; i++) {
+                var h = headers[i];
+                var lnk = links[i];
+
+                var titleEl = h.querySelector('.title .text-wrapper, .title-container .text-wrapper, .text-wrapper');
+                var budgetEl = h.querySelector('.price-order-in-list .param-title');
+                var timeEl   = h.querySelector('.time-title');
+
+                var parent = lnk.closest('li, article, .order-item, .order-wrapper') || lnk.parentElement;
+                var desc = '';
+                if (parent) {
+                    var sels = ['.external-links-wrapper span', '.order-description span',
+                                '.order-body span', '.task-description span', '.description'];
+                    for (var s = 0; s < sels.length; s++) {
+                        var el = parent.querySelector(sels[s]);
+                        if (el && el.textContent.trim()) { desc = el.textContent.trim(); break; }
+                    }
+                }
+
+                results.push({
+                    title:    titleEl  ? titleEl.textContent.trim()  : '',
+                    budget:   budgetEl ? budgetEl.textContent.trim() + ' ₽' : '',
+                    timeLeft: timeEl   ? timeEl.textContent.trim()   : '',
+                    href:     lnk.href || '',
+                    description: desc
+                });
+            }
+            return results;
+        """, count)
+
         projects = []
-        for i in range(count):
-            try:
-                # Re-find both lists every iteration — DOM changes after each expand
-                headers = self.driver.find_elements(By.CSS_SELECTOR, ".order-header")
-                links = self.driver.find_elements(By.CSS_SELECTOR, "a.order-in-list-link")
-
-                if i >= len(headers) or i >= len(links):
-                    break
-
-                header = headers[i]
-                link = links[i]
-
-                # Title
-                title = ""
-                for sel in [".title .text-wrapper", ".title-container .text-wrapper", ".text-wrapper"]:
-                    els = header.find_elements(By.CSS_SELECTOR, sel)
-                    if els and els[0].text.strip():
-                        title = els[0].text.strip()
-                        break
-
-                # Budget
-                budget = ""
-                els = header.find_elements(By.CSS_SELECTOR, ".price-order-in-list .param-title")
-                if els:
-                    budget = els[0].text.strip() + " ₽"
-
-                # Time left
-                time_left = ""
-                els = header.find_elements(By.CSS_SELECTOR, ".time-title")
-                if els:
-                    time_left = els[0].text.strip()
-
-                # URL / order id from link href
-                href = link.get_attribute("href") or ""
-                url = href if href.startswith("http") else BASE_URL + href
-                m = re.search(r'/freelancer/(\d+)', url)
-                order_id = m.group(1) if m else str(i)
-
-                if not title:
-                    log_agent_action("Workzilla", f"⚠️ [SCRAPE] Card {i+1}: no title, skipping")
-                    continue
-
-                # Click link to expand — link is sibling of header, not inside it
-                description = ""
-                try:
-                    self.driver.execute_script("arguments[0].click();", link)
-                    self._human_delay(1.0, 1.8)
-
-                    # Find parent container of the header, look for description inside it
-                    parent = self.driver.execute_script(
-                        "return arguments[0].closest('li, article, .order-item, .order-wrapper') "
-                        "|| arguments[0].parentNode;",
-                        header
-                    )
-                    if parent:
-                        for sel in [".external-links-wrapper span", ".order-description span",
-                                    ".order-body span", ".task-description span", ".description"]:
-                            desc_els = parent.find_elements(By.CSS_SELECTOR, sel)
-                            texts = [e.text.strip() for e in desc_els if e.text.strip()]
-                            if texts:
-                                description = "\n".join(texts)
-                                break
-
-                    # Fallback: global search, take last match (most recently expanded)
-                    if not description:
-                        for sel in [".external-links-wrapper span", ".order-description span"]:
-                            all_els = self.driver.find_elements(By.CSS_SELECTOR, sel)
-                            if all_els:
-                                description = all_els[-1].text.strip()
-                                break
-
-                except Exception as e:
-                    log_agent_action("Workzilla", f"⚠️ [SCRAPE] Expand error card {i+1}: {e}", level="WARNING")
-
-                log_agent_action("Workzilla", f"📋 [SCRAPE] {i+1}/{count}: {title[:50]} | desc={len(description)}ch")
-                projects.append({
-                    "id": order_id,
-                    "title": title,
-                    "description": description,
-                    "budget": budget,
-                    "url": url,
-                    "timeLeft": time_left,
-                    "proposals": None,
-                    "hired": None,
-                    "platform": "workzilla",
-                })
-            except Exception as e:
-                log_agent_action("Workzilla", f"⚠️ [SCRAPE] Card {i+1} error: {e}", level="WARNING")
+        for i, card in enumerate(raw_cards or []):
+            title = card.get("title", "")
+            if not title:
+                log_agent_action("Workzilla", f"⚠️ [SCRAPE] Card {i+1}: no title, skipping")
+                continue
+            href = card.get("href", "")
+            url = href if href.startswith("http") else BASE_URL + href
+            m = re.search(r'/freelancer/(\d+)', url)
+            order_id = m.group(1) if m else str(i)
+            description = card.get("description", "")
+            log_agent_action("Workzilla", f"📋 [SCRAPE] {i+1}/{count}: {title[:50]} | desc={len(description)}ch")
+            projects.append({
+                "id": order_id,
+                "title": title,
+                "description": description,
+                "budget": card.get("budget", ""),
+                "url": url,
+                "timeLeft": card.get("timeLeft", ""),
+                "proposals": None,
+                "hired": None,
+                "platform": "workzilla",
+            })
 
         log_agent_action("Workzilla", f"✅ [SCRAPE] Collected {len(projects)} projects")
         try:
