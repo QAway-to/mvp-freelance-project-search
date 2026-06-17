@@ -373,7 +373,22 @@ a {
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
+}
+
+.project-card-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.card-expand-btn {
+  white-space: nowrap;
+}
+
+.project-meta-collapsed {
+  margin: 4px 0 0;
 }
 
 .project-title {

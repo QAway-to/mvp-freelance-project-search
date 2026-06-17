@@ -3,8 +3,10 @@ import { useState } from 'react'
 const TRUNCATE_LEN = 150
 
 export default function ProjectCard({ project, platform = 'kwork', authHeaders = {} }) {
+  const [isCardExpanded, setIsCardExpanded] = useState(false)
+
   const hasLongDesc = project.description && project.description.length > TRUNCATE_LEN
-  const [isExpanded, setIsExpanded] = useState(!hasLongDesc)
+  const [isDescExpanded, setIsDescExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
   const [copyFailed, setCopyFailed] = useState(false)
 
@@ -84,108 +86,139 @@ export default function ProjectCard({ project, platform = 'kwork', authHeaders =
     <div className="project-card">
       <div className="project-card-header">
         <h3 className="project-title">{project.title || 'untitled'}</h3>
-        {scoreLabel && (
-          <span className={`project-score ${scoreClass}`}>{scoreLabel}</span>
-        )}
+        <div className="project-card-header-right">
+          {scoreLabel && (
+            <span className={`project-score ${scoreClass}`}>{scoreLabel}</span>
+          )}
+          <button
+            type="button"
+            className="btn-text card-expand-btn"
+            onClick={() => setIsCardExpanded(v => !v)}
+          >
+            {isCardExpanded ? '[ collapse ]' : '[ expand ]'}
+          </button>
+        </div>
       </div>
 
-      {project.description && (
-        <div className="project-desc-wrap">
-          <p className="project-description">
-            {isExpanded || !hasLongDesc
-              ? project.description
-              : `${project.description.substring(0, TRUNCATE_LEN)}…`}
-          </p>
-          {hasLongDesc && (
-            <button type="button" className="btn-text" onClick={() => setIsExpanded(v => !v)}>
-              {isExpanded ? '[ collapse ]' : '[ expand ]'}
-            </button>
+      {!isCardExpanded && (
+        <div className="project-meta project-meta-collapsed">
+          {project.budget && (
+            <span><span className="meta-key">бюджет </span>{project.budget}</span>
+          )}
+          {project.timeLeft != null && (
+            <span><span className="meta-key">time </span>{
+              isNaN(Number(project.timeLeft))
+                ? project.timeLeft
+                : `${Number(project.timeLeft).toFixed(2)}h`
+            }</span>
+          )}
+          {project.proposals != null && (
+            <span><span className="meta-key">откликов </span>{project.proposals}</span>
           )}
         </div>
       )}
 
-      <div className="project-meta">
-        {project.timeLeft != null && (
-          <span><span className="meta-key">time </span>{
-            isNaN(Number(project.timeLeft))
-              ? project.timeLeft
-              : `${Number(project.timeLeft).toFixed(2)}h`
-          }</span>
-        )}
-        {project.budget && (
-          <span><span className="meta-key">бюджет </span>{project.budget}</span>
-        )}
-        {project.proposals != null && (
-          <span><span className="meta-key">предложений </span>{project.proposals}</span>
-        )}
-      </div>
-
-      <div className="project-actions">
-        {project.url && (
-          <>
-            <a href={project.url} target="_blank" rel="noopener noreferrer" className="btn btn-sm">
-              open ↗
-            </a>
-            <button type="button" className="btn btn-sm" onClick={handleCopy}>
-              {copied ? 'copied ✓' : copyFailed ? 'failed ✗' : 'copy url'}
-            </button>
-          </>
-        )}
-        <button
-          type="button"
-          className="btn btn-sm btn-primary"
-          onClick={handleGenerateCp}
-          disabled={cpState === 'loading'}
-        >
-          {cpState === 'loading' ? 'генерирую…' : cpState === 'done' ? 'дать кп ещё раз' : 'дать кп'}
-        </button>
-      </div>
-
-      {cpState === 'error' && (
-        <p className="cp-error">
-          {!project.description ? 'Нет описания — КП невозможно сгенерировать.' : 'Ошибка генерации КП. Проверь OPENROUTER_API_KEY.'}
-        </p>
-      )}
-
-      {cpState === 'done' && cpText && (
-        <div className="cp-section">
-          <div className="cp-label">коммерческое предложение</div>
-          <pre className="cp-text">{cpText}</pre>
-          <div className="cp-actions">
-            {respondState === 'done' && (
-              <span className="cp-status cp-status-ok">✓ отклик отправлен</span>
-            )}
-            {respondState === 'error' && (
-              <span className="cp-status cp-status-err">✗ ошибка отправки</span>
-            )}
-            {respondState !== 'done' && (
-              <>
-                {respondState === 'confirm' && (
-                  <span className="cp-confirm-hint">уверен? нажми ещё раз →</span>
-                )}
-                <button
-                  type="button"
-                  className={`btn btn-sm ${respondState === 'confirm' ? 'btn-primary' : ''}`}
-                  onClick={handleSubmitRespond}
-                  disabled={respondState === 'sending'}
-                >
-                  {respondState === 'sending' ? 'отправляю…'
-                    : respondState === 'confirm' ? '✓ подтвердить отклик'
-                    : 'отправить отклик'}
+      {isCardExpanded && (
+        <>
+          {project.description && (
+            <div className="project-desc-wrap">
+              <p className="project-description">
+                {isDescExpanded || !hasLongDesc
+                  ? project.description
+                  : `${project.description.substring(0, TRUNCATE_LEN)}…`}
+              </p>
+              {hasLongDesc && (
+                <button type="button" className="btn-text" onClick={() => setIsDescExpanded(v => !v)}>
+                  {isDescExpanded ? '[ collapse desc ]' : '[ expand desc ]'}
                 </button>
-                {respondState === 'confirm' && (
-                  <button
-                    type="button"
-                    className="btn btn-sm"
-                    onClick={() => setRespondState('idle')}
-                  >
-                    отмена
-                  </button>
-                )}
-              </>
+              )}
+            </div>
+          )}
+
+          <div className="project-meta">
+            {project.timeLeft != null && (
+              <span><span className="meta-key">time </span>{
+                isNaN(Number(project.timeLeft))
+                  ? project.timeLeft
+                  : `${Number(project.timeLeft).toFixed(2)}h`
+              }</span>
+            )}
+            {project.budget && (
+              <span><span className="meta-key">бюджет </span>{project.budget}</span>
+            )}
+            {project.proposals != null && (
+              <span><span className="meta-key">предложений </span>{project.proposals}</span>
             )}
           </div>
-        </div>
+
+          <div className="project-actions">
+            {project.url && (
+              <>
+                <a href={project.url} target="_blank" rel="noopener noreferrer" className="btn btn-sm">
+                  open ↗
+                </a>
+                <button type="button" className="btn btn-sm" onClick={handleCopy}>
+                  {copied ? 'copied ✓' : copyFailed ? 'failed ✗' : 'copy url'}
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              onClick={handleGenerateCp}
+              disabled={cpState === 'loading'}
+            >
+              {cpState === 'loading' ? 'генерирую…' : cpState === 'done' ? 'дать кп ещё раз' : 'дать кп'}
+            </button>
+          </div>
+
+          {cpState === 'error' && (
+            <p className="cp-error">
+              {!project.description ? 'Нет описания — КП невозможно сгенерировать.' : 'Ошибка генерации КП. Проверь OPENROUTER_API_KEY.'}
+            </p>
+          )}
+
+          {cpState === 'done' && cpText && (
+            <div className="cp-section">
+              <div className="cp-label">коммерческое предложение</div>
+              <pre className="cp-text">{cpText}</pre>
+              <div className="cp-actions">
+                {respondState === 'done' && (
+                  <span className="cp-status cp-status-ok">✓ отклик отправлен</span>
+                )}
+                {respondState === 'error' && (
+                  <span className="cp-status cp-status-err">✗ ошибка отправки</span>
+                )}
+                {respondState !== 'done' && (
+                  <>
+                    {respondState === 'confirm' && (
+                      <span className="cp-confirm-hint">уверен? нажми ещё раз →</span>
+                    )}
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${respondState === 'confirm' ? 'btn-primary' : ''}`}
+                      onClick={handleSubmitRespond}
+                      disabled={respondState === 'sending'}
+                    >
+                      {respondState === 'sending' ? 'отправляю…'
+                        : respondState === 'confirm' ? '✓ подтвердить отклик'
+                        : 'отправить отклик'}
+                    </button>
+                    {respondState === 'confirm' && (
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => setRespondState('idle')}
+                      >
+                        отмена
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   )
