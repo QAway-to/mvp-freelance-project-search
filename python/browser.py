@@ -1,4 +1,5 @@
 import os
+import subprocess
 import undetected_chromedriver as uc
 from utils.logger import log_agent_action
 
@@ -31,7 +32,12 @@ def _chrome_bin() -> str | None:
 def create_driver():
     """Create a fresh Chrome instance. Caller must call .quit() when done."""
     chrome_bin = _chrome_bin()
-    log_agent_action("Browser", f"🔧 Starting Chrome... binary={chrome_bin}")
+    try:
+        ver = subprocess.check_output([chrome_bin or "google-chrome", "--version"],
+                                      stderr=subprocess.DEVNULL, timeout=5).decode().strip()
+        log_agent_action("Browser", f"🔧 Starting Chrome... binary={chrome_bin} version={ver}")
+    except Exception as ve:
+        log_agent_action("Browser", f"🔧 Starting Chrome... binary={chrome_bin} version=unknown ({ve})")
     try:
         driver = uc.Chrome(
             options=_build_options(),
