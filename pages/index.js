@@ -3,10 +3,55 @@ import { useState } from 'react'
 import ProjectSearchForm from '../src/components/ProjectSearchForm'
 import LogMonitor from '../src/components/LogMonitor'
 import { useLocalStorage } from '../src/hooks/useLocalStorage'
+import { useAuth } from '../src/hooks/useAuth'
 
 const MAX_HISTORY = 10
 
+function PasswordGate({ onLogin }) {
+  const [value, setValue] = useState('')
+  const [error, setError] = useState(false)
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    if (!value.trim()) return
+
+    const res = await fetch('/api/debug', {
+      headers: { 'x-webhook-password': value.trim() },
+    })
+    if (res.ok || res.status === 502 || res.status === 503) {
+      onLogin(value.trim())
+    } else {
+      setError(true)
+      setValue('')
+    }
+  }
+
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <form onSubmit={handleSubmit} style={{ width: '100%', maxWidth: 320 }} className="card">
+        <h2 style={{ marginBottom: 16 }}>// auth required</h2>
+        <div className="form-group">
+          <label className="form-label">password</label>
+          <input
+            type="password"
+            className="form-input"
+            value={value}
+            onChange={e => { setValue(e.target.value); setError(false) }}
+            placeholder="enter password"
+            autoFocus
+          />
+          {error && <span className="form-error">// неверный пароль</span>}
+        </div>
+        <button type="submit" className="btn btn-primary btn-block">
+          &gt; enter
+        </button>
+      </form>
+    </div>
+  )
+}
+
 export default function Home() {
+  const { password, login, logout, authHeaders } = useAuth()
   const [platform, setPlatform] = useState('kwork')
 
   const [kworkProjects, setKworkProjects] = useState([])
@@ -26,6 +71,8 @@ export default function Home() {
   const projects = platform === 'kwork' ? kworkProjects : wzProjects
   const error = platform === 'kwork' ? kworkError : wzError
 
+  if (!password) return <PasswordGate onLogin={login} />
+
   const handleKworkSearch = async (searchParams) => {
     setKworkLoading(true)
     setKworkError(null)
@@ -35,7 +82,7 @@ export default function Home() {
     try {
       const response = await fetch('/api/projects/search', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify(searchParams),
       })
       const data = await response.json()
@@ -69,7 +116,7 @@ export default function Home() {
     try {
       const response = await fetch('/api/workzilla/search', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
       })
       const data = await response.json()
 
@@ -96,7 +143,7 @@ export default function Home() {
     try {
       const response = await fetch('/api/projects/parse', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ url }),
       })
       const data = await response.json()
@@ -125,8 +172,20 @@ export default function Home() {
       </Head>
       <main className="page">
         <header className="page-header">
-          <h1>freelance_search</h1>
-          <p className="subtitle">// kwork · workzilla · url parser · v1.1</p>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <h1>freelance_search</h1>
+              <p className="subtitle">// kwork · workzilla · url parser · v1.1</p>
+            </div>
+            <button
+              type="button"
+              onClick={logout}
+              style={{ fontSize: 11, opacity: 0.4, cursor: 'pointer', background: 'none', border: 'none', color: 'inherit' }}
+              title="Log out"
+            >
+              // logout
+            </button>
+          </div>
         </header>
 
         <div className="platform-tabs">
@@ -155,6 +214,7 @@ export default function Home() {
               status={kworkStatus}
               projects={kworkProjects}
               platform="kwork"
+              authHeaders={authHeaders}
             />
           ) : (
             <ProjectSearchForm
@@ -164,6 +224,7 @@ export default function Home() {
               status={wzStatus}
               projects={wzProjects}
               platform="workzilla"
+              authHeaders={authHeaders}
             />
           )}
           {error && (
@@ -171,7 +232,7 @@ export default function Home() {
           )}
         </div>
 
-        <LogMonitor isActive={isLoading} />
+        <LogMonitor isActive={isLoading} password={password} />
       </main>
     </>
   )
