@@ -271,6 +271,10 @@ class AgentWorkzilla:
                 log_agent_action("Workzilla", f"⚠️ [SCRAPE] Card {i+1} error: {e}", level="WARNING")
 
         log_agent_action("Workzilla", f"✅ [SCRAPE] Collected {len(projects)} projects")
+        try:
+            self.driver.get("about:blank")
+        except Exception:
+            pass
         return projects
 
     # ── Submit response ───────────────────────────────────────────────────────
