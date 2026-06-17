@@ -10,7 +10,7 @@ const STATUS_MAP = {
   error:   { cls: 'dot-error',   label: 'error' },
 }
 
-export default function ProjectSearchForm({ onSearch, onParseUrl, isLoading, status, projects = [], platform = 'kwork' }) {
+export default function ProjectSearchForm({ onSearch, onParseUrl, isLoading, status, projects = [], platform = 'kwork', authHeaders = {} }) {
   const [activeTab, setActiveTab] = useState('search')
   const dot = STATUS_MAP[status] || STATUS_MAP.waiting
 
@@ -80,7 +80,7 @@ export default function ProjectSearchForm({ onSearch, onParseUrl, isLoading, sta
               </span>
             </div>
           )
-          : <ProjectResults projects={projects} platform={platform} />
+          : <ProjectResults projects={projects} platform={platform} authHeaders={authHeaders} />
       )}
     </div>
   )

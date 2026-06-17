@@ -2,7 +2,7 @@ import { useState } from 'react'
 
 const TRUNCATE_LEN = 150
 
-export default function ProjectCard({ project, platform = 'kwork' }) {
+export default function ProjectCard({ project, platform = 'kwork', authHeaders = {} }) {
   const hasLongDesc = project.description && project.description.length > TRUNCATE_LEN
   const [isExpanded, setIsExpanded] = useState(!hasLongDesc)
   const [copied, setCopied] = useState(false)
@@ -39,7 +39,7 @@ export default function ProjectCard({ project, platform = 'kwork' }) {
     try {
       const res = await fetch('/api/projects/cp', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({
           description: project.description,
           budget: project.budget,
@@ -69,7 +69,7 @@ export default function ProjectCard({ project, platform = 'kwork' }) {
         const endpoint = platform === 'workzilla' ? '/api/workzilla/respond' : '/api/projects/respond'
         const res = await fetch(endpoint, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeaders },
           body: JSON.stringify({ url: project.url, cp_text: cpText }),
         })
         const data = await res.json()

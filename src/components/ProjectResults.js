@@ -14,7 +14,7 @@ function parseBudget(str) {
   return isNaN(num) ? 0 : num
 }
 
-export default function ProjectResults({ projects, platform = 'kwork' }) {
+export default function ProjectResults({ projects, platform = 'kwork', authHeaders = {} }) {
   const [sortBy, setSortBy] = useState('score')
   const [sortDir, setSortDir] = useState('desc')
 
@@ -90,7 +90,7 @@ export default function ProjectResults({ projects, platform = 'kwork' }) {
 
       <div className="results-list">
         {sorted.map((project, i) => (
-          <ProjectCard key={project.url || i} project={project} platform={platform} />
+          <ProjectCard key={project.url || i} project={project} platform={platform} authHeaders={authHeaders} />
         ))}
       </div>
     </div>
