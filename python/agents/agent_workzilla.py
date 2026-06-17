@@ -151,7 +151,7 @@ class AgentWorkzilla:
 
     # ── Scraping ──────────────────────────────────────────────────────────────
 
-    def scrape_orders(self, limit: int = 100) -> List[Dict[str, Any]]:
+    def scrape_orders(self, limit: int = 30) -> List[Dict[str, Any]]:
         with self._lock:
             return self._scrape_orders_locked(limit)
 
@@ -263,9 +263,12 @@ class AgentWorkzilla:
 
         log_agent_action("Workzilla", f"✅ [SCRAPE] Collected {len(projects)} projects")
         try:
-            self.driver.get("about:blank")
+            self.driver.quit()
         except Exception:
             pass
+        self.driver = None
+        self.logged_in = False
+        log_agent_action("Workzilla", "🛑 Chrome stopped — RAM freed")
         return projects
 
     # ── Submit response ───────────────────────────────────────────────────────
