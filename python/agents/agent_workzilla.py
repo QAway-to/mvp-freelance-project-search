@@ -263,12 +263,9 @@ class AgentWorkzilla:
 
         log_agent_action("Workzilla", f"✅ [SCRAPE] Collected {len(projects)} projects")
         try:
-            self.driver.quit()
+            self.driver.get("about:blank")
         except Exception:
             pass
-        self.driver = None
-        self.logged_in = False
-        log_agent_action("Workzilla", "🛑 Chrome stopped — RAM freed")
         return projects
 
     # ── Submit response ───────────────────────────────────────────────────────
