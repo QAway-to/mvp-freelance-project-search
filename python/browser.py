@@ -35,7 +35,6 @@ def create_driver():
         options=_build_options(),
         browser_executable_path=_chrome_bin(),
         headless=True,
-        use_subprocess=False,
     )
     driver.set_page_load_timeout(30)
     log_agent_action("Browser", "✅ Chrome ready")
