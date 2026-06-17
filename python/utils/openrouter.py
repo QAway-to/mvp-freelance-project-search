@@ -22,9 +22,16 @@ async def chat_completion(messages: list[dict], timeout: int = 60) -> str:
                 json={"model": MODEL, "messages": messages},
                 timeout=aiohttp.ClientTimeout(total=timeout),
             ) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    log_agent_action("OpenRouter", f"❌ HTTP {resp.status}: {body[:300]}", level="ERROR")
+                    raise RuntimeError(f"OpenRouter HTTP {resp.status}: {body[:200]}")
                 data = await resp.json()
+                if "choices" not in data:
+                    log_agent_action("OpenRouter", f"❌ No choices in response: {str(data)[:300]}", level="ERROR")
+                    raise RuntimeError(f"No choices: {data}")
                 content = data["choices"][0]["message"]["content"]
                 return (content or "").strip()
     except Exception as e:
         log_agent_action("OpenRouter", f"❌ API error: {e}", level="ERROR")
-        return f"Ошибка запроса: {e}"
+        raise
