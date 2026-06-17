@@ -1,6 +1,7 @@
 import os
 import subprocess
 import undetected_chromedriver as uc
+from webdriver_manager.chrome import ChromeDriverManager
 from utils.logger import log_agent_action
 
 _driver = None
@@ -38,20 +39,15 @@ def create_driver():
         log_agent_action("Browser", f"🔧 Starting Chrome... binary={chrome_bin} version={ver}")
     except Exception as ve:
         log_agent_action("Browser", f"🔧 Starting Chrome... binary={chrome_bin} version=unknown ({ve})")
-    try:
-        driver = uc.Chrome(
-            options=_build_options(),
-            browser_executable_path=chrome_bin,
-            headless=True,
-        )
-    except Exception as e:
-        log_agent_action("Browser", f"❌ Chrome failed: {e}", level="ERROR")
-        # Try without specifying binary — let uc find Chrome itself
-        log_agent_action("Browser", "🔧 Retrying without explicit binary path...")
-        driver = uc.Chrome(
-            options=_build_options(),
-            headless=True,
-        )
+    log_agent_action("Browser", "🔧 Downloading matching chromedriver via webdriver-manager...")
+    driver_path = ChromeDriverManager().install()
+    log_agent_action("Browser", f"🔧 Chromedriver path: {driver_path}")
+    driver = uc.Chrome(
+        options=_build_options(),
+        driver_executable_path=driver_path,
+        browser_executable_path=chrome_bin,
+        headless=True,
+    )
     driver.set_page_load_timeout(30)
     log_agent_action("Browser", "✅ Chrome ready")
     return driver
