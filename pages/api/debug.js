@@ -1,4 +1,4 @@
-const { requireAuth } = require('../../../lib/auth')
+const { requireAuth } = require('../../lib/auth')
 const PYTHON_API_URL = process.env.PYTHON_API_URL
 
 export default async function handler(req, res) {
