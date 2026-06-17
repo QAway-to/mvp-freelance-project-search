@@ -1,7 +1,10 @@
+const { requireAuth } = require('../../../../lib/auth')
 const { searchProjects } = require('../../../lib/pythonClient')
 const { normalizeProject } = require('../../../lib/normalizers')
 
 export default async function handler(req, res) {
+  if (requireAuth(req, res)) return
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
@@ -26,11 +29,6 @@ export default async function handler(req, res) {
     })
   }
 
-  let projects = (result.data || []).map(normalizeProject)
-
-  return res.status(200).json({
-    status: 'success',
-    projects,
-    total: projects.length,
-  })
+  const projects = (result.data || []).map(normalizeProject)
+  return res.status(200).json({ status: 'success', projects, total: projects.length })
 }
