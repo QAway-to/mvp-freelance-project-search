@@ -1,4 +1,4 @@
-const { requireAuth } = require('../../../../lib/auth')
+const { requireAuth } = require('../../../lib/auth')
 const { parseProject } = require('../../../lib/pythonClient')
 const { normalizeProject } = require('../../../lib/normalizers')
 
@@ -37,10 +37,7 @@ export default async function handler(req, res) {
       : result.error === 'UPSTREAM_NOT_CONFIGURED' ? 503
       : result.error === 'PARSE_FAILED' ? 422
       : 502
-    return res.status(statusCode).json({
-      status: 'error',
-      message: result.error || 'Failed to parse project',
-    })
+    return res.status(statusCode).json({ status: 'error', message: result.error || 'Failed to parse project' })
   }
 
   return res.status(200).json({ status: 'success', project: normalizeProject(result.data) })
