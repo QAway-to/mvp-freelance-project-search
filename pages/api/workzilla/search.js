@@ -1,4 +1,4 @@
-const { requireAuth } = require('../../../../lib/auth')
+const { requireAuth } = require('../../../lib/auth')
 const { searchWorkzilla } = require('../../../lib/pythonClient')
 const { normalizeProject } = require('../../../lib/normalizers')
 
