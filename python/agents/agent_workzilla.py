@@ -6,6 +6,8 @@ import threading
 from typing import List, Dict, Any
 
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
 from browser import create_driver
@@ -151,122 +153,132 @@ class AgentWorkzilla:
 
     # ── Scraping ──────────────────────────────────────────────────────────────
 
-    def scrape_orders(self, limit: int = 30) -> List[Dict[str, Any]]:
+    # JS: extract list-level metadata for all cards (no expand needed)
+    _META_JS = """
+        var headers = document.querySelectorAll('.order-header');
+        var links   = document.querySelectorAll('a.order-in-list-link');
+        var n = Math.min(arguments[0], headers.length, links.length);
+        var out = [];
+        for (var i = 0; i < n; i++) {
+            var h = headers[i], lnk = links[i];
+            var t  = h.querySelector('.title .text-wrapper, .title-container .text-wrapper, .text-wrapper');
+            var b  = h.querySelector('.price-order-in-list .param-title');
+            var tm = h.querySelector('.time-title');
+            out.push({
+                title:    t  ? t.textContent.trim()  : '',
+                budget:   b  ? b.textContent.trim() + ' ₽' : '',
+                timeLeft: tm ? tm.textContent.trim() : '',
+                href:     lnk.href || ''
+            });
+        }
+        return out;
+    """
+
+    # JS: click one card by index (expands it via AJAX)
+    _CLICK_ONE_JS = """
+        var links = document.querySelectorAll('a.order-in-list-link');
+        if (links[arguments[0]]) { links[arguments[0]].click(); return true; }
+        return false;
+    """
+
+    # JS: read the description of one expanded card by index
+    _DESC_ONE_JS = """
+        var links = document.querySelectorAll('a.order-in-list-link');
+        var lnk = links[arguments[0]];
+        if (!lnk) return '';
+        var parent = lnk.closest('li, article, .order-item, .order-wrapper') || lnk.parentElement;
+        if (!parent) return '';
+        var sels = ['.external-links-wrapper span', '.order-description span',
+                    '.order-body span', '.task-description span', '.description'];
+        for (var s = 0; s < sels.length; s++) {
+            var el = parent.querySelector(sels[s]);
+            if (el && el.textContent.trim()) return el.textContent.trim();
+        }
+        return '';
+    """
+
+    def scrape_orders(self, limit: int = 15) -> List[Dict[str, Any]]:
+        """Backward-compatible: collect all projects into a list."""
+        return list(self.scrape_orders_iter(limit))
+
+    def scrape_orders_iter(self, limit: int = 15):
+        """Generator: yields each project as soon as it is scraped (for SSE streaming)."""
         with self._lock:
-            return self._scrape_orders_locked(limit)
+            if not self.driver:
+                self.setup_driver()
+            if not self.logged_in:
+                if not self.login():
+                    return
 
-    def _scrape_orders_locked(self, limit: int) -> List[Dict[str, Any]]:
-        if not self.driver:
-            self.setup_driver()
-        if not self.logged_in:
-            if not self.login():
-                return []
+            self.driver.set_script_timeout(60)
 
-        log_agent_action("Workzilla", f"🌐 [SCRAPE] Loading {ORDERS_URL}")
-        try:
-            self.driver.get(ORDERS_URL)
-        except TimeoutException:
-            log_agent_action("Workzilla", "⚠️ [SCRAPE] Page load timeout — checking state...", level="WARNING")
-        self._human_delay(2, 4)
-
-        if "login" in self.driver.current_url:
-            log_agent_action("Workzilla", "⚠️ [SCRAPE] Session expired — re-authenticating...", level="WARNING")
-            self.logged_in = False
-            if not self.login():
-                return []
+            log_agent_action("Workzilla", f"🌐 [SCRAPE] Loading {ORDERS_URL}")
             try:
                 self.driver.get(ORDERS_URL)
             except TimeoutException:
-                log_agent_action("Workzilla", "⚠️ [SCRAPE] Page load timeout on retry — checking state...", level="WARNING")
-            self._human_delay(2, 4)
+                log_agent_action("Workzilla", "⚠️ [SCRAPE] Page load timeout — checking state...", level="WARNING")
 
-        # Step 1: count available cards
-        total_links = self.driver.execute_script(
-            "return document.querySelectorAll('a.order-in-list-link').length"
-        )
-        count = min(limit, total_links)
-        log_agent_action("Workzilla", f"📋 [SCRAPE] Found {total_links} links, expanding {count}")
+            if "login" in self.driver.current_url:
+                log_agent_action("Workzilla", "⚠️ [SCRAPE] Session expired — re-authenticating...", level="WARNING")
+                self.logged_in = False
+                if not self.login():
+                    return
+                try:
+                    self.driver.get(ORDERS_URL)
+                except TimeoutException:
+                    log_agent_action("Workzilla", "⚠️ [SCRAPE] Page load timeout on retry...", level="WARNING")
 
-        if count == 0:
-            log_agent_action("Workzilla", "⚠️ [SCRAPE] No cards found on page", level="WARNING")
-            return []
+            # SPA renders cards AFTER DOMContentLoaded — wait for them explicitly
+            try:
+                WebDriverWait(self.driver, 30).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "a.order-in-list-link"))
+                )
+            except TimeoutException:
+                log_agent_action("Workzilla", "⚠️ [SCRAPE] Cards did not render in 30s", level="WARNING")
+                return
 
-        # Step 2: click all cards at once via JS, then wait for DOM to settle
-        self.driver.execute_script("""
-            var links = document.querySelectorAll('a.order-in-list-link');
-            for (var i = 0; i < Math.min(arguments[0], links.length); i++) {
-                links[i].click();
-            }
-        """, count)
-        log_agent_action("Workzilla", f"📋 [SCRAPE] Clicked {count} cards, waiting for expand...")
-        time.sleep(4)
+            # Extract list metadata for all cards in one fast call (no expand)
+            metas = self.driver.execute_script(self._META_JS, limit) or []
+            log_agent_action("Workzilla", f"📋 [SCRAPE] Found {len(metas)} cards, streaming...")
 
-        # Step 3: extract all data in one JS call
-        raw_cards = self.driver.execute_script("""
-            var headers = document.querySelectorAll('.order-header');
-            var links   = document.querySelectorAll('a.order-in-list-link');
-            var n = Math.min(arguments[0], headers.length, links.length);
-            var results = [];
-            for (var i = 0; i < n; i++) {
-                var h = headers[i];
-                var lnk = links[i];
+            yielded = 0
+            for i, meta in enumerate(metas):
+                title = meta.get("title", "")
+                if not title:
+                    continue
+                href = meta.get("href", "")
+                url = href if href.startswith("http") else BASE_URL + href
+                m = re.search(r'/freelancer/(\d+)', url)
+                order_id = m.group(1) if m else str(i)
 
-                var titleEl = h.querySelector('.title .text-wrapper, .title-container .text-wrapper, .text-wrapper');
-                var budgetEl = h.querySelector('.price-order-in-list .param-title');
-                var timeEl   = h.querySelector('.time-title');
+                # Expand THIS card only — one AJAX at a time, no flood
+                description = ""
+                try:
+                    self.driver.execute_script(self._CLICK_ONE_JS, i)
+                    time.sleep(1.2)
+                    description = self.driver.execute_script(self._DESC_ONE_JS, i) or ""
+                except Exception as e:
+                    log_agent_action("Workzilla", f"⚠️ [SCRAPE] card {i+1} expand error: {e}", level="WARNING")
 
-                var parent = lnk.closest('li, article, .order-item, .order-wrapper') || lnk.parentElement;
-                var desc = '';
-                if (parent) {
-                    var sels = ['.external-links-wrapper span', '.order-description span',
-                                '.order-body span', '.task-description span', '.description'];
-                    for (var s = 0; s < sels.length; s++) {
-                        var el = parent.querySelector(sels[s]);
-                        if (el && el.textContent.trim()) { desc = el.textContent.trim(); break; }
-                    }
+                yielded += 1
+                log_agent_action("Workzilla", f"📋 [SCRAPE] {i+1}/{len(metas)}: {title[:50]} | desc={len(description)}ch")
+                yield {
+                    "id": order_id,
+                    "title": title,
+                    "description": description,
+                    "budget": meta.get("budget", ""),
+                    "url": url,
+                    "timeLeft": meta.get("timeLeft", ""),
+                    "proposals": None,
+                    "hired": None,
+                    "platform": "workzilla",
                 }
 
-                results.push({
-                    title:    titleEl  ? titleEl.textContent.trim()  : '',
-                    budget:   budgetEl ? budgetEl.textContent.trim() + ' ₽' : '',
-                    timeLeft: timeEl   ? timeEl.textContent.trim()   : '',
-                    href:     lnk.href || '',
-                    description: desc
-                });
-            }
-            return results;
-        """, count)
-
-        projects = []
-        for i, card in enumerate(raw_cards or []):
-            title = card.get("title", "")
-            if not title:
-                log_agent_action("Workzilla", f"⚠️ [SCRAPE] Card {i+1}: no title, skipping")
-                continue
-            href = card.get("href", "")
-            url = href if href.startswith("http") else BASE_URL + href
-            m = re.search(r'/freelancer/(\d+)', url)
-            order_id = m.group(1) if m else str(i)
-            description = card.get("description", "")
-            log_agent_action("Workzilla", f"📋 [SCRAPE] {i+1}/{count}: {title[:50]} | desc={len(description)}ch")
-            projects.append({
-                "id": order_id,
-                "title": title,
-                "description": description,
-                "budget": card.get("budget", ""),
-                "url": url,
-                "timeLeft": card.get("timeLeft", ""),
-                "proposals": None,
-                "hired": None,
-                "platform": "workzilla",
-            })
-
-        log_agent_action("Workzilla", f"✅ [SCRAPE] Collected {len(projects)} projects")
-        try:
-            self.driver.get("about:blank")
-        except Exception:
-            pass
-        return projects
+            log_agent_action("Workzilla", f"✅ [SCRAPE] Streamed {yielded} projects")
+            try:
+                self.driver.get("about:blank")
+            except Exception:
+                pass
 
     # ── Submit response ───────────────────────────────────────────────────────
 

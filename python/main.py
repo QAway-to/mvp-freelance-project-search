@@ -1,6 +1,7 @@
 import asyncio
 import queue
 import os
+import threading
 import uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
@@ -226,16 +227,35 @@ async def api_search(request: Request):
 
 @app.post("/api/workzilla/search")
 async def workzilla_search(request: Request):
-    async def generator():
+    """Stream each scraped project to the client as soon as it's ready.
+
+    Selenium scraping is synchronous, so it runs in a worker thread that pushes
+    each project into an asyncio.Queue. The async generator drains the queue and
+    flushes one SSE event per project — true incremental delivery.
+    """
+    loop = asyncio.get_running_loop()
+    q: asyncio.Queue = asyncio.Queue()
+    _SENTINEL = object()
+
+    def worker():
         try:
-            projects = await asyncio.to_thread(agent_workzilla.scrape_orders)
-            for p in projects:
-                yield f"data: {json.dumps(p, ensure_ascii=False)}\n\n"
-                asyncio.create_task(_categorize_and_save([p]))
-        except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            for project in agent_workzilla.scrape_orders_iter():
+                loop.call_soon_threadsafe(q.put_nowait, project)
+        except Exception as exc:
+            loop.call_soon_threadsafe(q.put_nowait, {"error": str(exc)})
         finally:
-            yield 'data: {"done":true}\n\n'
+            loop.call_soon_threadsafe(q.put_nowait, _SENTINEL)
+
+    async def generator():
+        threading.Thread(target=worker, daemon=True).start()
+        while True:
+            item = await q.get()
+            if item is _SENTINEL:
+                break
+            yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+            if "error" not in item:
+                asyncio.create_task(_categorize_and_save([item]))
+        yield 'data: {"done":true}\n\n'
 
     return StreamingResponse(
         generator(),
