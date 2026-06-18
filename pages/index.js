@@ -116,16 +116,33 @@ export default function Home() {
     try {
       const response = await fetch('/api/workzilla/search', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        headers: authHeaders,
       })
-      const data = await response.json()
 
-      if (data.status === 'success') {
-        setWzProjects(data.projects || [])
-        setWzStatus('success')
-      } else {
-        setWzError(data.message || 'search failed')
-        setWzStatus('error')
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop()
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const data = JSON.parse(line.slice(6))
+            if (data.done) {
+              setWzStatus('success')
+            } else if (data.error) {
+              setWzError(data.error)
+              setWzStatus('error')
+            } else {
+              setWzProjects(prev => [...prev, data])
+            }
+          } catch {}
+        }
       }
     } catch (err) {
       setWzError(err.message || 'network error')

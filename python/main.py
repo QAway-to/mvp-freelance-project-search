@@ -226,9 +226,22 @@ async def api_search(request: Request):
 
 @app.post("/api/workzilla/search")
 async def workzilla_search(request: Request):
-    projects = await asyncio.to_thread(agent_workzilla.scrape_orders)
-    asyncio.create_task(_categorize_and_save(projects))
-    return {"success": True, "data": projects, "meta": {"total": len(projects)}, "error": None}
+    async def generator():
+        try:
+            projects = await asyncio.to_thread(agent_workzilla.scrape_orders)
+            for p in projects:
+                yield f"data: {json.dumps(p, ensure_ascii=False)}\n\n"
+                asyncio.create_task(_categorize_and_save([p]))
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        finally:
+            yield 'data: {"done":true}\n\n'
+
+    return StreamingResponse(
+        generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/workzilla/respond")
