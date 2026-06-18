@@ -253,7 +253,7 @@ async def workzilla_search(request: Request):
             if item is _SENTINEL:
                 break
             yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
-            if "error" not in item:
+            if "error" not in item and "_update" not in item:
                 asyncio.create_task(_categorize_and_save([item]))
         yield 'data: {"done":true}\n\n'
 

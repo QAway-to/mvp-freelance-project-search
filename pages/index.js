@@ -138,6 +138,10 @@ export default function Home() {
             } else if (data.error) {
               setWzError(data.error)
               setWzStatus('error')
+            } else if (data._update) {
+              setWzProjects(prev => prev.map(p =>
+                p.id === data._update ? { ...p, description: data.description } : p
+              ))
             } else {
               setWzProjects(prev => [...prev, data])
             }

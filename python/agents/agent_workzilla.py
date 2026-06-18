@@ -153,22 +153,34 @@ class AgentWorkzilla:
 
     # ── Scraping ──────────────────────────────────────────────────────────────
 
-    # JS: extract list-level metadata for all cards (no expand needed)
+    # JS: extract metadata + description for all cards from the collapsed DOM
+    # (description is often present in the list markup, just hidden — no click needed)
     _META_JS = """
         var headers = document.querySelectorAll('.order-header');
         var links   = document.querySelectorAll('a.order-in-list-link');
         var n = Math.min(arguments[0], headers.length, links.length);
+        var descSels = ['.external-links-wrapper span', '.order-description span',
+                        '.order-body span', '.task-description span', '.description'];
         var out = [];
         for (var i = 0; i < n; i++) {
             var h = headers[i], lnk = links[i];
             var t  = h.querySelector('.title .text-wrapper, .title-container .text-wrapper, .text-wrapper');
             var b  = h.querySelector('.price-order-in-list .param-title');
             var tm = h.querySelector('.time-title');
+            var parent = lnk.closest('li, article, .order-item, .order-wrapper') || lnk.parentElement;
+            var desc = '';
+            if (parent) {
+                for (var s = 0; s < descSels.length; s++) {
+                    var el = parent.querySelector(descSels[s]);
+                    if (el && el.textContent.trim()) { desc = el.textContent.trim(); break; }
+                }
+            }
             out.push({
                 title:    t  ? t.textContent.trim()  : '',
                 budget:   b  ? b.textContent.trim() + ' ₽' : '',
                 timeLeft: tm ? tm.textContent.trim() : '',
-                href:     lnk.href || ''
+                href:     lnk.href || '',
+                description: desc
             });
         }
         return out;
@@ -237,10 +249,12 @@ class AgentWorkzilla:
                 log_agent_action("Workzilla", "⚠️ [SCRAPE] Cards did not render in 30s", level="WARNING")
                 return
 
-            # Extract list metadata for all cards in one fast call (no expand)
+            # One fast call: metadata + description from collapsed DOM (no clicks)
             metas = self.driver.execute_script(self._META_JS, limit) or []
             log_agent_action("Workzilla", f"📋 [SCRAPE] Found {len(metas)} cards, streaming...")
 
+            # Pass 1: yield every card immediately so they appear in the UI instantly
+            empties = []  # (index, order_id) for cards needing expand to get description
             yielded = 0
             for i, meta in enumerate(metas):
                 title = meta.get("title", "")
@@ -250,18 +264,12 @@ class AgentWorkzilla:
                 url = href if href.startswith("http") else BASE_URL + href
                 m = re.search(r'/freelancer/(\d+)', url)
                 order_id = m.group(1) if m else str(i)
-
-                # Expand THIS card only — one AJAX at a time, no flood
-                description = ""
-                try:
-                    self.driver.execute_script(self._CLICK_ONE_JS, i)
-                    time.sleep(1.2)
-                    description = self.driver.execute_script(self._DESC_ONE_JS, i) or ""
-                except Exception as e:
-                    log_agent_action("Workzilla", f"⚠️ [SCRAPE] card {i+1} expand error: {e}", level="WARNING")
+                description = meta.get("description", "")
+                if not description:
+                    empties.append((i, order_id))
 
                 yielded += 1
-                log_agent_action("Workzilla", f"📋 [SCRAPE] {i+1}/{len(metas)}: {title[:50]} | desc={len(description)}ch")
+                log_agent_action("Workzilla", f"📋 [SCRAPE] {i+1}/{len(metas)}: {title[:40]} | desc={len(description)}ch")
                 yield {
                     "id": order_id,
                     "title": title,
@@ -274,7 +282,25 @@ class AgentWorkzilla:
                     "platform": "workzilla",
                 }
 
-            log_agent_action("Workzilla", f"✅ [SCRAPE] Streamed {yielded} projects")
+            log_agent_action("Workzilla", f"✅ [SCRAPE] Streamed {yielded} cards "
+                                          f"({len(empties)} need description enrich)")
+
+            # Pass 2 (only if descriptions weren't in the collapsed DOM):
+            # expand each empty card one at a time and push a description update.
+            if empties:
+                self.driver.set_script_timeout(15)
+                for i, order_id in empties:
+                    description = ""
+                    try:
+                        self.driver.execute_script(self._CLICK_ONE_JS, i)
+                        time.sleep(1.0)
+                        description = self.driver.execute_script(self._DESC_ONE_JS, i) or ""
+                    except Exception as e:
+                        log_agent_action("Workzilla", f"⚠️ [SCRAPE] enrich card {i+1}: {e}", level="WARNING")
+                    if description:
+                        log_agent_action("Workzilla", f"📝 [SCRAPE] enriched {order_id}: {len(description)}ch")
+                        yield {"_update": order_id, "description": description}
+
             try:
                 self.driver.get("about:blank")
             except Exception:
