@@ -27,10 +27,32 @@ import agents.agent_a as _agent_a_module
 _agent_a_module.agent_a_instance = agent_a
 
 
+import time as _time
+
+# Reclaim Workzilla's Chrome RSS during quiet periods (matters most on 512MB Render).
+_WZ_IDLE_REAP_SECS = 600      # quit Chrome after 10 min with no scrape
+_WZ_REAP_INTERVAL_SECS = 120  # how often the reaper checks
+
+
+async def _workzilla_idle_reaper():
+    while True:
+        await asyncio.sleep(_WZ_REAP_INTERVAL_SECS)
+        try:
+            ts = agent_workzilla._last_scrape_ts
+            if (agent_workzilla.driver is not None and ts > 0
+                    and _time.time() - ts > _WZ_IDLE_REAP_SECS):
+                log_agent_action("Workzilla", "💤 [SELENIUM] Idle — reaping Chrome to free memory")
+                await agent_workzilla.stop()
+        except Exception as exc:
+            log_agent_action("Workzilla", f"⚠️ [SELENIUM] Idle reaper error: {exc}", level="WARNING")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await telegram_bot.start()
+    reaper = asyncio.create_task(_workzilla_idle_reaper())
     yield
+    reaper.cancel()
     await telegram_bot.stop()
     quit_driver()
 
@@ -140,7 +162,8 @@ async def get_status():
 @app.get("/projects")
 async def get_projects():
     suitable_count = len([p for p in agent_a.found_projects if p.get("evaluation", {}).get("suitable", False)])
-    return {"total": len(agent_a.found_projects), "suitable": suitable_count, "projects": agent_a.found_projects}
+    # found_projects is a deque (bounded); json.dumps needs a list.
+    return {"total": len(agent_a.found_projects), "suitable": suitable_count, "projects": list(agent_a.found_projects)}
 
 
 async def _categorize_and_save(projects: list):
@@ -248,14 +271,22 @@ async def workzilla_search(request: Request):
 
     async def generator():
         threading.Thread(target=worker, daemon=True).start()
-        while True:
-            item = await q.get()
-            if item is _SENTINEL:
-                break
-            yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
-            if "error" not in item and "_update" not in item:
-                asyncio.create_task(_categorize_and_save([item]))
-        yield 'data: {"done":true}\n\n'
+        try:
+            while True:
+                item = await q.get()
+                if item is _SENTINEL:
+                    break
+                yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+                if "error" not in item and "_update" not in item:
+                    asyncio.create_task(_categorize_and_save([item]))
+            yield 'data: {"done":true}\n\n'
+        except GeneratorExit:
+            # Client disconnected — signal the Selenium worker thread to stop so it
+            # releases agent_workzilla._lock instead of scraping on (which would block
+            # the next request). Only fires on disconnect, never on clean completion,
+            # so a normal finish can't leave a stale cancel flag for the next scrape.
+            agent_workzilla._cancel.set()
+            raise
 
     return StreamingResponse(
         generator(),

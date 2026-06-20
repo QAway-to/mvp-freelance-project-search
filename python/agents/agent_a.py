@@ -3,6 +3,7 @@ import random
 import time
 import re
 import os
+from collections import deque
 from datetime import datetime
 from typing import List, Dict, Any
 import aiohttp
@@ -26,7 +27,9 @@ class AgentA:
         self._evaluator = None  # lazy: only created when parse_single_url is called
         self.status = "stopped"
         self.last_run_time = None
-        self.found_projects: List[Dict[str, Any]] = []
+        # Bounded history: keep only the most recent N suitable projects so the list
+        # cannot grow unbounded across searches (memory-leak guard on 512MB Render).
+        self.found_projects: deque = deque(maxlen=200)
         self.running = False
         self.current_session_start = None
         self.current_session_end = None
