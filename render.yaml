@@ -18,7 +18,9 @@ services:
         sync: false
       - key: KWORK_COOKIES
         sync: false
-      - key: OPENROUTER_API_KEY
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: DEEPSEEK_MODEL
         sync: false
       - key: WORKZILLA_EMAIL
         sync: false

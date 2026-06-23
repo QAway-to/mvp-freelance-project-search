@@ -1,5 +1,5 @@
 import json
-from utils.openrouter import chat_completion
+from utils.llm import chat_completion
 from utils.logger import log_agent_action
 
 _SYSTEM = """Ты категоризатор заказов с биржи фриланса (русскоязычный рынок).

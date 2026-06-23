@@ -7,7 +7,7 @@ from telegram.error import TelegramError
 
 from config import config
 from utils.logger import log_agent_action
-from utils.openrouter import chat_completion
+from utils.llm import chat_completion
 
 _PROMPT_FILE = os.path.join(os.path.dirname(__file__), 'prompts', 'cp_system.txt')
 
@@ -245,7 +245,7 @@ class TelegramBot:
 
         reply = await chat_completion(conv)
 
-        _is_error = reply.startswith("Ошибка запроса:") or reply.startswith("OpenRouter API key")
+        _is_error = reply.startswith("Ошибка запроса:") or reply.startswith("DeepSeek API key")
         if _is_error:
             log_agent_action("Telegram", f"LLM error: {reply}", level="ERROR")
             conv.pop()

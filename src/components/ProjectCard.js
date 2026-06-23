@@ -174,7 +174,7 @@ export default function ProjectCard({ project, platform = 'kwork', authHeaders =
 
           {cpState === 'error' && (
             <p className="cp-error">
-              {!project.description ? 'Нет описания — КП невозможно сгенерировать.' : 'Ошибка генерации КП. Проверь OPENROUTER_API_KEY.'}
+              {!project.description ? 'Нет описания — КП невозможно сгенерировать.' : 'Ошибка генерации КП. Проверь DEEPSEEK_API_KEY.'}
             </p>
           )}
 

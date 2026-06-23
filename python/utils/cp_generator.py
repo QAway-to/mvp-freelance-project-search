@@ -1,5 +1,5 @@
 import os
-from utils.openrouter import chat_completion
+from utils.llm import chat_completion
 from utils.logger import log_agent_action
 
 _PROMPT_FILE = os.path.join(os.path.dirname(__file__), '..', 'prompts', 'cp_system.txt')
