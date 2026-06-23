@@ -1,12 +1,7 @@
 import { useState } from 'react'
 
-const TRUNCATE_LEN = 150
-
 export default function ProjectCard({ project, platform = 'kwork', authHeaders = {} }) {
   const [isCardExpanded, setIsCardExpanded] = useState(false)
-
-  const hasLongDesc = project.description && project.description.length > TRUNCATE_LEN
-  const [isDescExpanded, setIsDescExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
   const [copyFailed, setCopyFailed] = useState(false)
 
@@ -122,16 +117,7 @@ export default function ProjectCard({ project, platform = 'kwork', authHeaders =
         <>
           {project.description && (
             <div className="project-desc-wrap">
-              <p className="project-description">
-                {isDescExpanded || !hasLongDesc
-                  ? project.description
-                  : `${project.description.substring(0, TRUNCATE_LEN)}…`}
-              </p>
-              {hasLongDesc && (
-                <button type="button" className="btn-text" onClick={() => setIsDescExpanded(v => !v)}>
-                  {isDescExpanded ? '[ collapse desc ]' : '[ expand desc ]'}
-                </button>
-              )}
+              <p className="project-description">{project.description}</p>
             </div>
           )}
 

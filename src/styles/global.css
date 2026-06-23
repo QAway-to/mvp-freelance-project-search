@@ -420,6 +420,8 @@ a {
   font-size: 0.8rem;
   color: var(--text-muted);
   line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .project-meta {
