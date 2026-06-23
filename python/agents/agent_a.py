@@ -24,7 +24,7 @@ from evaluation.evaluator import ProjectEvaluator
 # .get_attribute("textContent") flattens these anchors into the text, so strip them.
 _EXPAND_MARKERS = (
     "Показать полностью", "Показать ещё", "Показать еще",
-    "Читать полностью", "Развернуть", "Подробнее",
+    "Читать полностью", "Развернуть", "Подробнее", "Свернуть", "Скрыть",
 )
 
 
@@ -587,18 +587,28 @@ class AgentA:
                         if bm:
                             budget = bm.group(0).strip()
 
-                    # Description from card — read textContent (captures the full text even
-                    # when Kwork clamps it client-side; .text only returns visible chars),
-                    # fall back to visible .text, then strip the inline "Показать полностью".
-                    description = ""
-                    for sel in [".wants-card__description-text", "[class*='description']"]:
-                        try:
-                            el = card.find_element(By.CSS_SELECTOR, sel)
-                            raw = (el.get_attribute("textContent") or "").strip() or el.text.strip()
-                            cleaned = _clean_description(raw)
-                            if cleaned and len(cleaned) > 20:
-                                description = cleaned
+                    # Full description: the listing shows only a clamped snippet with a
+                    # "Показать полностью" (span.kw-link-dashed) link that expands the rest
+                    # INLINE — no navigation to the project page needed. Click it, then read
+                    # the expanded text (innerText keeps the <br> line breaks).
+                    try:
+                        for _more in card.find_elements(By.CSS_SELECTOR, "span.kw-link-dashed, [class*='kw-link-dashed']"):
+                            _mt = (_more.text or "").lower()
+                            if any(w in _mt for w in ("показать", "полностью", "ещё", "еще", "развернуть")):
+                                self.driver.execute_script("arguments[0].click();", _more)
+                                time.sleep(0.3)
                                 break
+                    except Exception:
+                        pass
+
+                    description = ""
+                    for sel in [".wants-card__description-text", ".d-inline", "[class*='description']"]:
+                        try:
+                            for el in card.find_elements(By.CSS_SELECTOR, sel):
+                                raw = (el.get_attribute("innerText") or "").strip() or (el.get_attribute("textContent") or "").strip()
+                                cleaned = _clean_description(raw)
+                                if len(cleaned) > len(description):
+                                    description = cleaned
                         except Exception:
                             pass
 
