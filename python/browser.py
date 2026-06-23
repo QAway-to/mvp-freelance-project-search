@@ -54,6 +54,62 @@ def create_driver():
     return driver
 
 
+def reap_driver(driver) -> None:
+    """Quit a driver AND kill any orphaned Chrome/chromedriver process tree.
+
+    undetected-chromedriver's .quit() frequently leaves orphaned `chrome`
+    processes alive on Linux; across repeated searches these accumulate and
+    exhaust RAM (OOM on 512MB Render). We capture the pids before quitting,
+    then forcibly reap the whole tree.
+    """
+    if driver is None:
+        return
+    pids = []
+    try:
+        bp = getattr(driver, "browser_pid", None)
+        if bp:
+            pids.append(bp)
+    except Exception:
+        pass
+    try:
+        svc_proc = getattr(getattr(driver, "service", None), "process", None)
+        if svc_proc and getattr(svc_proc, "pid", None):
+            pids.append(svc_proc.pid)
+    except Exception:
+        pass
+
+    try:
+        driver.quit()
+    except Exception:
+        pass
+
+    # Kill leftover process trees (renderers, zombie chrome) that quit() missed.
+    try:
+        import psutil
+        for pid in pids:
+            try:
+                parent = psutil.Process(pid)
+            except psutil.NoSuchProcess:
+                continue
+            procs = parent.children(recursive=True) + [parent]
+            for p in procs:
+                try:
+                    p.kill()
+                except Exception:
+                    pass
+            psutil.wait_procs(procs, timeout=5)
+    except Exception as e:
+        # psutil missing or failed — best-effort os.kill fallback
+        import os
+        import signal
+        for pid in pids:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except Exception:
+                pass
+        log_agent_action("Browser", f"⚠️ psutil reap failed, used os.kill: {e}", level="WARNING")
+
+
 def get_driver():
     """Shared Chrome singleton for Kwork agent."""
     global _driver
@@ -71,9 +127,6 @@ def get_driver():
 def quit_driver():
     global _driver
     if _driver:
-        try:
-            _driver.quit()
-        except Exception:
-            pass
+        reap_driver(_driver)
         _driver = None
         log_agent_action("Browser", "🛑 Chrome stopped")

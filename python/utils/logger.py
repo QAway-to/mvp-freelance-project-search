@@ -3,9 +3,18 @@ import queue
 import json
 from collections import deque
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from typing import Dict, Any
 from rich.console import Console
 from rich.logging import RichHandler
+
+# Third-party loggers that spam INFO every few seconds (and leak the Telegram
+# bot token in httpx request URLs). Pin them to WARNING so /debug logs stay
+# useful, the log file/buffer don't churn, and the token isn't logged.
+_NOISY_LOGGERS = (
+    "httpx", "httpcore", "telegram", "telegram.ext", "apscheduler",
+    "urllib3", "selenium", "asyncio", "WDM", "undetected_chromedriver",
+)
 
 # Global log queue for real-time streaming - increased size for detailed logging
 log_queue: queue.Queue = queue.Queue(maxsize=5000)
@@ -57,10 +66,15 @@ def setup_logging():
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[
             RichHandler(console=console, rich_tracebacks=True),
-            logging.FileHandler("logs/app.log", encoding="utf-8"),
+            RotatingFileHandler("logs/app.log", maxBytes=5 * 1024 * 1024,
+                                backupCount=2, encoding="utf-8"),
             QueueHandler()
         ]
     )
+
+    # Silence noisy third-party loggers (also stops the bot token leaking via httpx).
+    for name in _NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
 
     logger = logging.getLogger("freelance_mvp")
     logger.setLevel(logging.INFO)

@@ -11,7 +11,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
-from browser import create_driver
+from browser import create_driver, reap_driver
 from config import config
 from utils.logger import log_agent_action
 
@@ -239,10 +239,7 @@ class AgentWorkzilla:
             self._scrape_count += 1
             if self.driver is not None and self._scrape_count > self._RESTART_EVERY:
                 log_agent_action("Workzilla", f"♻️ [SELENIUM] Recycling Chrome after {self._RESTART_EVERY} scrapes")
-                try:
-                    self.driver.quit()
-                except Exception:
-                    pass
+                reap_driver(self.driver)
                 self.driver = None
                 self.logged_in = False
                 self._scrape_count = 1
@@ -426,10 +423,7 @@ class AgentWorkzilla:
         """Quit Chrome and reset session state. Safe to call from any thread (takes lock)."""
         with self._lock:
             if self.driver:
-                try:
-                    self.driver.quit()
-                except Exception:
-                    pass
+                reap_driver(self.driver)
                 self.driver = None
                 log_agent_action("Workzilla", "🛑 [SELENIUM] Chrome stopped (idle/explicit)")
             # Must reset logged_in too: next scrape recreates the driver and would
