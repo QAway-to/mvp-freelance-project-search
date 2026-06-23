@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ruff_cache/
+.pytest_cache/
+.venv/
+venv/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# Local temp / debug artifacts
+*tempdebug*.json
+C*tool-results*.txt
+debug*.txt
+debug*.json
