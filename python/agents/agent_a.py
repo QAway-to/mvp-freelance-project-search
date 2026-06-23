@@ -20,6 +20,30 @@ from config import config
 from utils.logger import logger, log_agent_action
 from evaluation.evaluator import ProjectEvaluator
 
+# Inline expand-link text Kwork renders at the end of a clamped description.
+# .get_attribute("textContent") flattens these anchors into the text, so strip them.
+_EXPAND_MARKERS = (
+    "Показать полностью", "Показать ещё", "Показать еще",
+    "Читать полностью", "Развернуть", "Подробнее",
+)
+
+
+def _clean_description(text: str) -> str:
+    """Strip Kwork's inline expand-link text and a trailing ellipsis from a description."""
+    if not text:
+        return ""
+    cleaned = text
+    for marker in _EXPAND_MARKERS:
+        idx = cleaned.find(marker)
+        if idx != -1:
+            cleaned = cleaned[:idx]
+    cleaned = cleaned.strip()
+    for ellipsis in ("…", "..."):
+        if cleaned.endswith(ellipsis):
+            cleaned = cleaned[:-len(ellipsis)].strip()
+    return cleaned
+
+
 class AgentA:
     def __init__(self):
         self.driver = None
@@ -561,14 +585,17 @@ class AgentA:
                         if bm:
                             budget = bm.group(0).strip()
 
-                    # Description snippet from card
+                    # Description from card — read textContent (captures the full text even
+                    # when Kwork clamps it client-side; .text only returns visible chars),
+                    # fall back to visible .text, then strip the inline "Показать полностью".
                     description = ""
                     for sel in [".wants-card__description-text", "[class*='description']"]:
                         try:
                             el = card.find_element(By.CSS_SELECTOR, sel)
-                            t = el.text.strip()
-                            if t and len(t) > 20:
-                                description = t
+                            raw = (el.get_attribute("textContent") or "").strip() or el.text.strip()
+                            cleaned = _clean_description(raw)
+                            if cleaned and len(cleaned) > 20:
+                                description = cleaned
                                 break
                         except Exception:
                             pass
