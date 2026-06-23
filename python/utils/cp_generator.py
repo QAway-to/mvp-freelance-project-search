@@ -19,10 +19,12 @@ SYSTEM_PROMPT = _load_system_prompt()
 
 async def generate_proposal(project: dict) -> str:
     task = (
-        f"Напиши КП для следующего заказа с Kwork:\n\n"
-        f"Название: {project.get('title', '?')}\n"
-        f"Бюджет: {project.get('budget') or 'не указан'}\n"
-        f"Описание:\n{project.get('description') or '(нет описания)'}"
+        "ЗАДАЧА КЛИЕНТА:\n"
+        f"{project.get('description') or '(описание не указано)'}\n\n"
+        f"Название заказа: {project.get('title', '?')}\n"
+        f"Бюджет клиента: {project.get('budget') or 'не указан'}\n\n"
+        "Вложения / детали: нет.\n\n"
+        "Напиши КП строго по системному промпту."
     )
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
