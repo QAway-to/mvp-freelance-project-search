@@ -227,27 +227,29 @@ class AgentA:
             return False
 
     def parse_urgency(self, text: str) -> float:
-        """Parse 'Time Left' string to hours. Example: 'Осталось: 2 ч. 5 мин.' -> 2.08"""
-        if not text or 'Осталось' not in text:
+        """Parse a 'time left' string to hours. Handles 'Осталось: 2 ч. 5 мин.',
+        bare '3 ч. 57 мин.', '1 д. 4 ч.', '45 мин.'. Returns 999.0 only when no
+        time tokens are present (treated as 'no deadline'). Does NOT require the
+        word 'Осталось' — Kwork renders the timer in several formats."""
+        if not text:
             return 999.0
-        
+
         try:
-            cleaned = text.replace('Осталось:', '').strip()
-            # Regex to find days, hours, mins
-            days = 0
-            hours = 0
-            mins = 0
-            
-            d_match = re.search(r'(\d+)\s*д', cleaned)
-            h_match = re.search(r'(\d+)\s*ч', cleaned)
-            m_match = re.search(r'(\d+)\s*мин', cleaned)
-            
-            if d_match: days = int(d_match.group(1))
-            if h_match: hours = int(h_match.group(1))
-            if m_match: mins = int(m_match.group(1))
-            
-            total_hours = (days * 24) + hours + (mins / 60)
-            return total_hours
+            d_match = re.search(r'(\d+)\s*д', text)
+            h_match = re.search(r'(\d+)\s*ч', text)
+            m_match = re.search(r'(\d+)\s*мин', text)
+
+            # No numeric time tokens at all → unknown deadline.
+            # "< 1 ч." / "меньше часа" style strings still mean very urgent.
+            if not (d_match or h_match or m_match):
+                if 'ч' in text or 'мин' in text:
+                    return 0.5
+                return 999.0
+
+            days = int(d_match.group(1)) if d_match else 0
+            hours = int(h_match.group(1)) if h_match else 0
+            mins = int(m_match.group(1)) if m_match else 0
+            return (days * 24) + hours + (mins / 60)
         except Exception as e:
             log_agent_action("Agent A", f"⚠️ Error parsing urgency '{text}': {e}", level="DEBUG")
             return 999.0
