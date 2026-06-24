@@ -1043,6 +1043,67 @@ class AgentA:
             log_agent_action("Agent A", f"❌ [RESPOND] Error submitting response: {e}", level="ERROR")
             return False
 
+    def inspect_offer_form(self, project_id: str) -> Dict[str, Any]:
+        """TEMP DIAGNOSTIC: open new_offer page and dump срок dropdown options + key
+        selector presence. Read-only — does NOT submit an offer. REMOVE AFTER USE."""
+        if not self.driver:
+            self.setup_driver()
+        if not self.logged_in:
+            self.login()
+
+        url = f"https://kwork.ru/new_offer?project={project_id}"
+        log_agent_action("Agent A", f"🔍 [INSPECT] Navigating to {url}")
+        self.driver.get(url)
+        self.human_delay(2, 4)
+
+        result: Dict[str, Any] = {
+            "project_id": project_id,
+            "final_url": self.driver.current_url,
+            "title": self.driver.title,
+        }
+
+        editors = self.driver.find_elements(By.CSS_SELECTOR, "div.trumbowyg-editor")
+        result["editor_found"] = len(editors)
+
+        prices = self.driver.find_elements(By.CSS_SELECTOR, "input#offer-custom-price")
+        result["price_found"] = len(prices)
+        if prices:
+            result["price_placeholder"] = prices[0].get_attribute("placeholder")
+
+        greens = self.driver.find_elements(By.CSS_SELECTOR, "button.kw-button--green")
+        result["green_buttons"] = [b.text.strip() for b in greens]
+
+        # срок vue-select: open each toggle and dump its options
+        toggles = self.driver.find_elements(By.CSS_SELECTOR, "div.vs__dropdown-toggle")
+        result["vs_toggles_count"] = len(toggles)
+        dropdowns = []
+        for i, tog in enumerate(toggles):
+            entry: Dict[str, Any] = {"index": i}
+            try:
+                placeholder_inputs = tog.find_elements(By.CSS_SELECTOR, "input")
+                entry["placeholder"] = placeholder_inputs[0].get_attribute("placeholder") if placeholder_inputs else None
+                self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", tog)
+                self.human_delay(0.3, 0.6)
+                self.driver.execute_script("arguments[0].click();", tog)
+                self.human_delay(0.8, 1.5)
+                menus = self.driver.find_elements(By.CSS_SELECTOR, "ul.vs__dropdown-menu")
+                if menus:
+                    lis = menus[0].find_elements(By.CSS_SELECTOR, "li")
+                    entry["options"] = [li.text.strip() for li in lis]
+                    entry["menu_html"] = menus[0].get_attribute("outerHTML")[:4000]
+                else:
+                    entry["options"] = []
+                    entry["note"] = "no ul.vs__dropdown-menu after click"
+                self.driver.execute_script("arguments[0].click();", tog)  # close
+                self.human_delay(0.2, 0.5)
+            except Exception as e:
+                entry["error"] = str(e)[:200]
+            dropdowns.append(entry)
+        result["dropdowns"] = dropdowns
+
+        log_agent_action("Agent A", f"🔍 [INSPECT] Done: editors={result['editor_found']} prices={result['price_found']} toggles={result['vs_toggles_count']}")
+        return result
+
     async def stop(self):
         """Stop the agent (shared browser is managed by browser.py)."""
         log_agent_action("Agent A", "Stopping agent")

@@ -204,6 +204,18 @@ async def debug_info():
     }
 
 
+@app.get("/debug/offer-form")
+async def debug_offer_form(project: str):
+    """TEMP DIAGNOSTIC — dump срок dropdown options + key selectors from the new_offer
+    page. Read-only, does NOT submit an offer. REMOVE AFTER USE."""
+    try:
+        result = await asyncio.to_thread(agent_a.inspect_offer_form, project)
+        return {"success": True, "data": result, "error": None}
+    except Exception as exc:
+        log_agent_action("API", f"[OFFER-FORM] inspection error: {exc}", level="ERROR")
+        return JSONResponse({"success": False, "data": None, "error": str(exc)}, status_code=500)
+
+
 # ── Next.js proxy endpoints ────────────────────────────────────────────────────
 
 @app.post("/api/search")
