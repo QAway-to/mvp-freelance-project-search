@@ -37,6 +37,9 @@ class TelegramBot:
         self._pending_cp: dict[tuple[str, int], str] = {}
 
     async def start(self) -> None:
+        if not config.TELEGRAM_BOT_ENABLED:
+            log_agent_action("Telegram", "Bot disabled (TELEGRAM_BOT_ENABLED not set) — skipping polling")
+            return
         if not config.TELEGRAM_BOT_TOKEN:
             log_agent_action("Telegram", "Bot token not configured — disabled")
             return

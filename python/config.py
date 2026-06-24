@@ -45,6 +45,10 @@ class Config:
     # Telegram
     TELEGRAM_BOT_TOKEN: Optional[str] = os.getenv('TELEGRAM_BOT_TOKEN')
     TELEGRAM_CHANNEL_ID: Optional[str] = os.getenv('TELEGRAM_CHANNEL_ID')
+    # Bot polling is opt-in. The service only hosts the Telegram mini-app, so the
+    # bot stays off by default — otherwise getUpdates conflicts spam the logs and
+    # waste RAM on the 512MB tier. Set TELEGRAM_BOT_ENABLED=true to run the bot.
+    TELEGRAM_BOT_ENABLED: bool = os.getenv('TELEGRAM_BOT_ENABLED', 'false').strip().lower() in ('1', 'true', 'yes', 'on')
     
     # n8n Integration
     N8N_WEBHOOK_URL: Optional[str] = os.getenv('N8N_WEBHOOK_URL')
