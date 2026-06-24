@@ -602,22 +602,12 @@ class AgentA:
                         if bm:
                             budget = bm.group(0).strip()
 
-                    # Full description: when the text exceeds Kwork's clamp, the card shows a
-                    # "Показать полностью" (span.kw-link-dashed) link that expands the rest
-                    # INLINE. Click it ONLY when present, then read. If the link is absent the
-                    # card already holds the full text — just read it.
-                    # Keep this targeted: only the specific span.kw-link-dashed link, no generic
-                    # ".d-inline" scan and no innerText+textContent double-read (that exploded
-                    # Selenium round-trips per card and timed out search on Render free).
-                    try:
-                        for _more in card.find_elements(By.CSS_SELECTOR, "span.kw-link-dashed"):
-                            if "показать" in (_more.text or "").lower():
-                                self.driver.execute_script("arguments[0].click();", _more)
-                                time.sleep(0.2)
-                                break
-                    except Exception:
-                        pass
-
+                    # Full description WITHOUT any per-card click. Kwork only clamps the text
+                    # visually via CSS (line-clamp); "Показать полностью" just toggles a class.
+                    # textContent already returns the full underlying body, so reading it is
+                    # enough. No "Показать полностью" click: it added a Selenium round-trip per
+                    # card and re-rendered the card (staleness on later reads) — that combo both
+                    # timed out search and silently dropped cards to 0 results on Render free.
                     description = ""
                     for sel in [".wants-card__description-text", "[class*='description']"]:
                         try:
