@@ -1,5 +1,11 @@
 import { useState } from 'react'
 
+// Срок выполнения — точные варианты из vue-select формы отклика Kwork (new_offer).
+const SROK_OPTIONS = [
+  '1 день', '2 дня', '3 дня', '4 дня', '5 дней', '6 дней',
+  '7 дней', '10 дней', '2 недели', '3 недели', '1 месяц', '2 месяца',
+]
+
 export default function ProjectCard({ project, platform = 'kwork', authHeaders = {} }) {
   const [isCardExpanded, setIsCardExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -8,6 +14,7 @@ export default function ProjectCard({ project, platform = 'kwork', authHeaders =
   const [cpState, setCpState] = useState('idle') // idle | loading | done | error
   const [cpText, setCpText] = useState('')
   const [respondState, setRespondState] = useState('idle') // idle | confirm | sending | done | error
+  const [srok, setSrok] = useState('3 дня') // срок выполнения, выбирается вручную перед откликом
 
   const score = project.evaluation?.totalScore
   const scoreLabel = score != null ? `${(score * 100).toFixed(0)}%` : null
@@ -67,7 +74,7 @@ export default function ProjectCard({ project, platform = 'kwork', authHeaders =
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...authHeaders },
-          body: JSON.stringify({ url: project.url, cp_text: cpText }),
+          body: JSON.stringify({ url: project.url, cp_text: cpText, duration: srok }),
         })
         const data = await res.json()
         setRespondState(data.success ? 'done' : 'error')
@@ -156,6 +163,16 @@ export default function ProjectCard({ project, platform = 'kwork', authHeaders =
             >
               {cpState === 'loading' ? 'генерирую…' : cpState === 'done' ? 'дать кп ещё раз' : 'дать кп'}
             </button>
+            <select
+              className="srok-select"
+              value={srok}
+              onChange={(e) => setSrok(e.target.value)}
+              title="срок выполнения для отклика"
+            >
+              {SROK_OPTIONS.map((opt) => (
+                <option key={opt} value={opt}>{opt}</option>
+              ))}
+            </select>
           </div>
 
           {cpState === 'error' && (

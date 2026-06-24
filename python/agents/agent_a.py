@@ -971,8 +971,13 @@ class AgentA:
             log_agent_action("Agent A", f"❌ [PARSE] Extraction error: {e}", level="ERROR")
             return None
 
-    def submit_response(self, url: str, cp_text: str) -> bool:
-        """Submit a response (отклик) on a Kwork project page via Selenium."""
+    def submit_response(self, url: str, cp_text: str, duration: str = None) -> bool:
+        """Submit a response (отклик) on a Kwork project page via Selenium.
+
+        `duration` — выбранный в UI срок выполнения (напр. "3 дня"). Прокинут до бэка;
+        фактический выбор в форме new_offer будет добавлен при переписывании этого метода
+        под подтверждённые селекторы (trumbowyg / offer-custom-price / vue-select срока)."""
+        log_agent_action("Agent A", f"📨 [RESPOND] duration={duration!r}")
         if not self.driver:
             self.setup_driver()
         if not self.logged_in:

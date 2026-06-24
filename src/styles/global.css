@@ -260,6 +260,24 @@ a {
   color: var(--accent) !important;
 }
 
+.srok-select {
+  padding: 4px 8px;
+  font-family: inherit;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  background: var(--surface);
+  color: var(--text-muted);
+  border: 1px solid var(--border-active);
+  border-radius: 0;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.srok-select:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .btn-text {
   background: transparent;
   border: none;
