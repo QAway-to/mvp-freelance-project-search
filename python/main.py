@@ -207,7 +207,11 @@ async def debug_info():
 @app.get("/debug/offer-form")
 async def debug_offer_form(project: str):
     """TEMP DIAGNOSTIC — dump срок dropdown options + key selectors from the new_offer
-    page. Read-only, does NOT submit an offer. REMOVE AFTER USE."""
+    page. Read-only, does NOT submit an offer. Disabled by default (drives the live
+    Kwork account); re-enable by setting env ENABLE_OFFER_FORM_DEBUG=1 on Render."""
+    import os
+    if os.getenv("ENABLE_OFFER_FORM_DEBUG") != "1":
+        raise HTTPException(status_code=404, detail="Not Found")
     try:
         result = await asyncio.to_thread(agent_a.inspect_offer_form, project)
         return {"success": True, "data": result, "error": None}
