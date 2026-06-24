@@ -602,11 +602,22 @@ class AgentA:
                         if bm:
                             budget = bm.group(0).strip()
 
-                    # Description from card — single lightweight read. Kwork clamps the text
-                    # client-side via CSS; .get_attribute("textContent") returns the full body
-                    # without any per-card click, then strip the inline "Показать полностью".
-                    # NOTE: no per-card click+sleep and no generic ".d-inline" scan — both
-                    # exploded Selenium round-trips per card and timed out search on Render free.
+                    # Full description: when the text exceeds Kwork's clamp, the card shows a
+                    # "Показать полностью" (span.kw-link-dashed) link that expands the rest
+                    # INLINE. Click it ONLY when present, then read. If the link is absent the
+                    # card already holds the full text — just read it.
+                    # Keep this targeted: only the specific span.kw-link-dashed link, no generic
+                    # ".d-inline" scan and no innerText+textContent double-read (that exploded
+                    # Selenium round-trips per card and timed out search on Render free).
+                    try:
+                        for _more in card.find_elements(By.CSS_SELECTOR, "span.kw-link-dashed"):
+                            if "показать" in (_more.text or "").lower():
+                                self.driver.execute_script("arguments[0].click();", _more)
+                                time.sleep(0.2)
+                                break
+                    except Exception:
+                        pass
+
                     description = ""
                     for sel in [".wants-card__description-text", "[class*='description']"]:
                         try:
