@@ -10,7 +10,7 @@ import aiohttp
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException
 from urllib.parse import quote_plus
 
 from agents.search_params import SearchParams
@@ -971,93 +971,197 @@ class AgentA:
             log_agent_action("Agent A", f"❌ [PARSE] Extraction error: {e}", level="ERROR")
             return None
 
-    def submit_response(self, url: str, cp_text: str, duration: str = None) -> bool:
-        """Submit a response (отклик) on a Kwork project page via Selenium.
+    def _select_duration(self, duration: str) -> bool:
+        """Open the «Срок выполнения» vue-select and click the option matching `duration`
+        (e.g. "3 дня"). Returns True if an option was selected."""
+        import unicodedata
+        from selenium.webdriver.common.action_chains import ActionChains
+        from selenium.webdriver.common.keys import Keys
 
-        `duration` — выбранный в UI срок выполнения (напр. "3 дня"). Прокинут до бэка;
-        фактический выбор в форме new_offer будет добавлен при переписывании этого метода
-        под подтверждённые селекторы (trumbowyg / offer-custom-price / vue-select срока)."""
-        log_agent_action("Agent A", f"📨 [RESPOND] duration={duration!r}")
+        def _norm(s: str) -> str:
+            return unicodedata.normalize("NFKC", s or "").strip().lower()
+
+        toggle = None
+        for tog in self.driver.find_elements(By.CSS_SELECTOR, "div.vs__dropdown-toggle"):
+            inputs = tog.find_elements(By.CSS_SELECTOR, "input")
+            ph = (inputs[0].get_attribute("placeholder") or "").strip().lower() if inputs else ""
+            if ph.startswith("срок"):
+                toggle = tog
+                break
+        if not toggle:
+            return False
+
+        inputs = toggle.find_elements(By.CSS_SELECTOR, "input")
+        inp = inputs[0] if inputs else None
+        self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", toggle)
+        self.human_delay(0.3, 0.6)
+
+        target = _norm(duration)
+
+        def _pick() -> bool:
+            opts = self.driver.find_elements(By.CSS_SELECTOR, "ul.vs__dropdown-menu li.vs__dropdown-option") \
+                or self.driver.find_elements(By.CSS_SELECTOR, "li.vs__dropdown-option")
+            if not opts:
+                return False
+            # exact match first, then forgiving contains-match (Kwork may add qualifiers/NBSP)
+            for matcher in (lambda t: _norm(t) == target, lambda t: bool(target) and target in _norm(t)):
+                for li in opts:
+                    try:
+                        if matcher(li.text):
+                            try:
+                                li.click()
+                            except Exception:
+                                self.driver.execute_script("arguments[0].click();", li)
+                            return True
+                    except StaleElementReferenceException:
+                        continue
+            return False
+
+        openers = [
+            lambda: (inp or toggle).click(),
+            lambda: ActionChains(self.driver).move_to_element(inp or toggle).click().perform(),
+        ]
+        if inp is not None:
+            openers.append(lambda i=inp: i.send_keys(Keys.ARROW_DOWN))
+        for opener in openers:
+            try:
+                opener()
+                self.human_delay(0.8, 1.4)
+                if _pick():
+                    self.human_delay(0.3, 0.6)
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def submit_response(self, url: str, cp_text: str, duration: str = None) -> bool:
+        """Submit a response (отклик) on the Kwork new_offer form via Selenium.
+
+        Fills the confirmed form fields and clicks «Предложить»:
+          - КП text  → trumbowyg contenteditable editor
+          - price    → 75% of the upper bound of the allowed range (offer-custom-price)
+          - срок     → vue-select option matching `duration` (default "3 дня")
+        This POSTS a real offer — the UI gates it behind an explicit confirm."""
+        from selenium.webdriver.common.keys import Keys
+        from browser import quit_driver
+
+        duration = (duration or "3 дня").strip()
+
+        m = re.search(r"/projects/(\d+)", url) or re.search(r"project=(\d+)", url)
+        if not m:
+            log_agent_action("Agent A", f"❌ [RESPOND] Cannot extract project id from {url}", level="ERROR")
+            return False
+        offer_url = f"https://kwork.ru/new_offer?project={m.group(1)}"
+
         if not self.driver:
             self.setup_driver()
         if not self.logged_in:
             self.login()
 
-        log_agent_action("Agent A", f"📨 [RESPOND] Navigating to {url}")
+        log_agent_action("Agent A", f"📨 [RESPOND] Opening offer form {offer_url} (duration={duration!r})")
+
+        def _open_form() -> bool:
+            self.driver.get(offer_url)
+            self.human_delay(1, 2)
+            if "new_offer" not in self.driver.current_url:
+                return False
+            try:
+                WebDriverWait(self.driver, 15).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "div.trumbowyg-editor"))
+                )
+                return True
+            except TimeoutException:
+                return False
+
         try:
-            self.driver.get(url)
-            self.human_delay(2, 4)
-        except Exception as e:
-            log_agent_action("Agent A", f"❌ [RESPOND] Failed to load page: {e}", level="ERROR")
+            ok = _open_form()
+        except Exception as e1:
+            # renderer timeout / OOM — recreate Chrome, re-login, retry once
+            log_agent_action("Agent A", f"⚠️ [RESPOND] nav failed ({str(e1)[:80]}); recreating driver", level="WARNING")
+            quit_driver()
+            self.logged_in = False
+            self.setup_driver()
+            if not self.login():
+                log_agent_action("Agent A", "❌ [RESPOND] Re-login after driver recreate failed — aborting", level="ERROR")
+                return False
+            try:
+                ok = _open_form()
+            except Exception as e2:
+                log_agent_action("Agent A", f"❌ [RESPOND] Failed to load offer form: {e2}", level="ERROR")
+                return False
+
+        if not ok:
+            log_agent_action("Agent A", f"❌ [RESPOND] Offer form unavailable (at {self.driver.current_url}); session may be invalid", level="ERROR")
             return False
 
         try:
-            # Click "Откликнуться" button
-            respond_btn = None
-            for sel in [
-                "button.want-card__respond-btn",
-                "button[class*='respond']",
-                "a[class*='respond']",
-                ".want-card__footer button",
-            ]:
-                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
-                if els:
-                    respond_btn = els[0]
-                    break
-
-            if not respond_btn:
-                # Try by text content
-                buttons = self.driver.find_elements(By.TAG_NAME, "button")
-                for btn in buttons:
-                    if "откликнуться" in btn.text.lower() or "отклик" in btn.text.lower():
-                        respond_btn = btn
-                        break
-
-            if not respond_btn:
-                log_agent_action("Agent A", "❌ [RESPOND] Could not find respond button", level="ERROR")
+            # ── 1. КП text into the trumbowyg contenteditable editor ──
+            editor = next((ed for ed in self.driver.find_elements(By.CSS_SELECTOR, "div.trumbowyg-editor") if ed.is_displayed()), None)
+            if not editor:
+                log_agent_action("Agent A", "❌ [RESPOND] КП editor (trumbowyg) not found", level="ERROR")
                 return False
+            self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", editor)
+            editor.click()
+            self.human_delay(0.4, 0.8)
+            editor.send_keys(Keys.CONTROL + "a")
+            editor.send_keys(Keys.DELETE)
+            self.human_delay(0.2, 0.4)
+            editor.send_keys(cp_text.replace("\r\n", "\n").replace("\r", "\n"))
+            self.human_delay(0.6, 1.2)
 
-            self.driver.execute_script("arguments[0].click();", respond_btn)
-            self.human_delay(1, 2)
+            # ── 2. price = 75% of the upper bound of the allowed range ──
+            price_inputs = self.driver.find_elements(By.CSS_SELECTOR, "input#offer-custom-price")
+            if price_inputs:
+                placeholder = price_inputs[0].get_attribute("placeholder") or ""
+                nums = [int(re.sub(r"\D", "", n)) for n in re.findall(r"\d[\d\s]*\d|\d", placeholder)]
+                nums = [n for n in nums if n > 0]
+                if nums:
+                    max_price = max(nums)  # upper bound of the allowed range
+                    price = int(round(max_price * 0.75))
+                    pi = price_inputs[0]
+                    self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", pi)
+                    pi.click()
+                    pi.clear()
+                    pi.send_keys(str(price))
+                    self.human_delay(0.4, 0.8)
+                    log_agent_action("Agent A", f"📨 [RESPOND] price={price} (75% of max {max_price})")
+                else:
+                    log_agent_action("Agent A", f"⚠️ [RESPOND] cannot parse price range from {placeholder!r}", level="WARNING")
+            else:
+                log_agent_action("Agent A", "⚠️ [RESPOND] price input not found", level="WARNING")
 
-            # Find textarea and fill CP text
-            textarea = None
-            for sel in ["textarea[name='description']", "textarea[class*='respond']", "textarea"]:
-                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
-                if els:
-                    textarea = els[0]
-                    break
+            # ── 3. срок выполнения via vue-select ──
+            if not self._select_duration(duration):
+                log_agent_action("Agent A", f"⚠️ [RESPOND] could not select duration {duration!r}", level="WARNING")
 
-            if not textarea:
-                log_agent_action("Agent A", "❌ [RESPOND] Could not find textarea", level="ERROR")
-                return False
-
-            textarea.clear()
-            self.human_delay(0.5, 1)
-            textarea.send_keys(cp_text)
-            self.human_delay(1, 2)
-
-            # Click submit
-            submit_btn = None
-            for sel in [
-                "button[type='submit']",
-                "button.js-respond-form-submit",
-                "button[class*='submit']",
-            ]:
-                els = self.driver.find_elements(By.CSS_SELECTOR, sel)
-                if els:
-                    submit_btn = els[0]
-                    break
-
+            # ── 4. submit ──
+            submit_btn = next((b for b in self.driver.find_elements(By.CSS_SELECTOR, "button.kw-button--green")
+                               if "предлож" in (b.text or "").lower()), None)
             if not submit_btn:
-                log_agent_action("Agent A", "❌ [RESPOND] Could not find submit button", level="ERROR")
+                log_agent_action("Agent A", "❌ [RESPOND] submit button «Предложить» not found", level="ERROR")
                 return False
+            self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", submit_btn)
+            self.human_delay(0.3, 0.6)
+            try:
+                submit_btn.click()  # native click — Vue @click handlers need a real event
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", submit_btn)
+            self.human_delay(2.5, 4)
 
-            self.driver.execute_script("arguments[0].click();", submit_btn)
-            self.human_delay(2, 3)
+            # ── verify: leaving the form / editor gone signals success ──
+            def _shown(el) -> bool:
+                try:
+                    return el.is_displayed()
+                except Exception:
+                    return False
 
-            log_agent_action("Agent A", f"✅ [RESPOND] Response submitted to {url}")
-            return True
+            left_form = "new_offer" not in self.driver.current_url
+            editor_gone = not any(_shown(e) for e in self.driver.find_elements(By.CSS_SELECTOR, "div.trumbowyg-editor"))
+            if left_form or editor_gone:
+                log_agent_action("Agent A", f"✅ [RESPOND] Offer submitted for {offer_url}")
+                return True
+            log_agent_action("Agent A", f"⚠️ [RESPOND] clicked «Предложить» but still on form ({self.driver.current_url}) — possible validation error", level="WARNING")
+            return False
 
         except Exception as e:
             log_agent_action("Agent A", f"❌ [RESPOND] Error submitting response: {e}", level="ERROR")
