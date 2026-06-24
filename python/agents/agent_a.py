@@ -1131,28 +1131,72 @@ class AgentA:
         greens = self.driver.find_elements(By.CSS_SELECTOR, "button.kw-button--green")
         result["green_buttons"] = [b.text.strip() for b in greens]
 
-        # срок vue-select: open each toggle and dump its options
-        toggles = self.driver.find_elements(By.CSS_SELECTOR, "div.vs__dropdown-toggle")
-        result["vs_toggles_count"] = len(toggles)
+        # vue-select dropdowns: open each (native click on inner search input opens
+        # vue-select; synthetic JS click does not trigger its focus handler) and dump options.
+        from selenium.webdriver.common.action_chains import ActionChains
+        from selenium.webdriver.common.keys import Keys
+
+        def _read_open_menu() -> List[str]:
+            opts: List[str] = []
+            for sel in ("ul.vs__dropdown-menu li", "li.vs__dropdown-option"):
+                lis = self.driver.find_elements(By.CSS_SELECTOR, sel)
+                if lis:
+                    opts = [li.text.strip() for li in lis if li.text.strip()]
+                    if opts:
+                        break
+            return opts
+
+        toggle_count = len(self.driver.find_elements(By.CSS_SELECTOR, "div.vs__dropdown-toggle"))
+        result["vs_toggles_count"] = toggle_count
         dropdowns = []
-        for i, tog in enumerate(toggles):
+        for i in range(toggle_count):
             entry: Dict[str, Any] = {"index": i}
             try:
-                placeholder_inputs = tog.find_elements(By.CSS_SELECTOR, "input")
-                entry["placeholder"] = placeholder_inputs[0].get_attribute("placeholder") if placeholder_inputs else None
+                tog = self.driver.find_elements(By.CSS_SELECTOR, "div.vs__dropdown-toggle")[i]
+                inputs = tog.find_elements(By.CSS_SELECTOR, "input")
+                inp = inputs[0] if inputs else None
+                entry["placeholder"] = inp.get_attribute("placeholder") if inp else None
                 self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", tog)
                 self.human_delay(0.3, 0.6)
-                self.driver.execute_script("arguments[0].click();", tog)
-                self.human_delay(0.8, 1.5)
-                menus = self.driver.find_elements(By.CSS_SELECTOR, "ul.vs__dropdown-menu")
-                if menus:
-                    lis = menus[0].find_elements(By.CSS_SELECTOR, "li")
-                    entry["options"] = [li.text.strip() for li in lis]
-                    entry["menu_html"] = menus[0].get_attribute("outerHTML")[:4000]
+
+                opts: List[str] = []
+                # attempt 1: native click on the search input
+                try:
+                    (inp or tog).click()
+                    self.human_delay(0.8, 1.4)
+                    opts = _read_open_menu()
+                except Exception:
+                    pass
+                # attempt 2: ActionChains click
+                if not opts and inp is not None:
+                    try:
+                        ActionChains(self.driver).move_to_element(inp).click().perform()
+                        self.human_delay(0.8, 1.4)
+                        opts = _read_open_menu()
+                    except Exception:
+                        pass
+                # attempt 3: ARROW_DOWN to open
+                if not opts and inp is not None:
+                    try:
+                        inp.send_keys(Keys.ARROW_DOWN)
+                        self.human_delay(0.8, 1.4)
+                        opts = _read_open_menu()
+                    except Exception:
+                        pass
+
+                entry["options"] = opts
+                if not opts:
+                    entry["note"] = "menu did not open / no options"
                 else:
-                    entry["options"] = []
-                    entry["note"] = "no ul.vs__dropdown-menu after click"
-                self.driver.execute_script("arguments[0].click();", tog)  # close
+                    menus = self.driver.find_elements(By.CSS_SELECTOR, "ul.vs__dropdown-menu")
+                    if menus:
+                        entry["menu_html"] = menus[0].get_attribute("outerHTML")[:3000]
+                # close
+                if inp is not None:
+                    try:
+                        inp.send_keys(Keys.ESCAPE)
+                    except Exception:
+                        pass
                 self.human_delay(0.2, 0.5)
             except Exception as e:
                 entry["error"] = str(e)[:200]
