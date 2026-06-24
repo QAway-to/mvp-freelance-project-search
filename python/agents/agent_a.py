@@ -44,6 +44,24 @@ def _clean_description(text: str) -> str:
     return cleaned
 
 
+def _normalize_cookie(c: Dict[str, Any]) -> Dict[str, str] | None:
+    """Strip stray whitespace from cookie keys/values to survive env-var paste
+    corruption (e.g. 'valu e', 'kwor k.ru'). Cookie name/value/domain never contain
+    literal spaces (RFC 6265 encodes them as %20), so removing all whitespace is safe.
+    Returns a Selenium-ready cookie dict, or None if name/value missing."""
+    def despace(v: Any) -> Any:
+        return re.sub(r"\s+", "", v) if isinstance(v, str) else v
+
+    c = {despace(k): v for k, v in c.items()}
+    name = despace(c.get("name"))
+    value = despace(c.get("value"))
+    if not name or value is None:
+        return None
+    domain = despace(c.get("domain")) or ".kwork.ru"
+    path = (c.get("path") or "/").strip() or "/"
+    return {"name": name, "value": value, "domain": domain, "path": path}
+
+
 class AgentA:
     def __init__(self):
         self.driver = None
@@ -87,13 +105,10 @@ class AgentA:
             injected = 0
             for c in cookies:
                 try:
-                    # Selenium expects specific keys only
-                    self.driver.add_cookie({
-                        "name": c["name"],
-                        "value": c["value"],
-                        "domain": c.get("domain", ".kwork.ru"),
-                        "path": c.get("path", "/"),
-                    })
+                    clean = _normalize_cookie(c)
+                    if not clean:
+                        continue
+                    self.driver.add_cookie(clean)
                     injected += 1
                 except Exception:
                     pass
@@ -1062,14 +1077,15 @@ class AgentA:
                 cookies = _json.loads(raw)
                 inject["attempted"] = len(cookies)
                 for c in cookies:
+                    clean = _normalize_cookie(c)
+                    if not clean:
+                        inject["failed"].append({"name": c.get("name"), "error": "missing name/value after normalize"})
+                        continue
                     try:
-                        self.driver.add_cookie({
-                            "name": c["name"], "value": c["value"],
-                            "domain": c.get("domain", ".kwork.ru"), "path": c.get("path", "/"),
-                        })
+                        self.driver.add_cookie(clean)
                         inject["ok"] += 1
                     except Exception as ce:
-                        inject["failed"].append({"name": c.get("name"), "domain": c.get("domain"), "error": str(ce)[:120]})
+                        inject["failed"].append({"name": clean["name"], "domain": clean["domain"], "error": str(ce)[:120]})
             except Exception as e:
                 inject["parse_error"] = str(e)[:200]
         self.logged_in = True
