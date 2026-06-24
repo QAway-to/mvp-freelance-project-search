@@ -602,28 +602,20 @@ class AgentA:
                         if bm:
                             budget = bm.group(0).strip()
 
-                    # Full description: the listing shows only a clamped snippet with a
-                    # "Показать полностью" (span.kw-link-dashed) link that expands the rest
-                    # INLINE — no navigation to the project page needed. Click it, then read
-                    # the expanded text (innerText keeps the <br> line breaks).
-                    try:
-                        for _more in card.find_elements(By.CSS_SELECTOR, "span.kw-link-dashed, [class*='kw-link-dashed']"):
-                            _mt = (_more.text or "").lower()
-                            if any(w in _mt for w in ("показать", "полностью", "ещё", "еще", "развернуть")):
-                                self.driver.execute_script("arguments[0].click();", _more)
-                                time.sleep(0.3)
-                                break
-                    except Exception:
-                        pass
-
+                    # Description from card — single lightweight read. Kwork clamps the text
+                    # client-side via CSS; .get_attribute("textContent") returns the full body
+                    # without any per-card click, then strip the inline "Показать полностью".
+                    # NOTE: no per-card click+sleep and no generic ".d-inline" scan — both
+                    # exploded Selenium round-trips per card and timed out search on Render free.
                     description = ""
-                    for sel in [".wants-card__description-text", ".d-inline", "[class*='description']"]:
+                    for sel in [".wants-card__description-text", "[class*='description']"]:
                         try:
-                            for el in card.find_elements(By.CSS_SELECTOR, sel):
-                                raw = (el.get_attribute("innerText") or "").strip() or (el.get_attribute("textContent") or "").strip()
-                                cleaned = _clean_description(raw)
-                                if len(cleaned) > len(description):
-                                    description = cleaned
+                            el = card.find_element(By.CSS_SELECTOR, sel)
+                            raw = (el.get_attribute("textContent") or "").strip() or el.text.strip()
+                            cleaned = _clean_description(raw)
+                            if cleaned and len(cleaned) > 20:
+                                description = cleaned
+                                break
                         except Exception:
                             pass
 
