@@ -1055,8 +1055,9 @@ class AgentA:
 
         if not self.driver:
             self.setup_driver()
-        if not self.logged_in:
-            self.login()
+        if not self.logged_in and not self.login():
+            log_agent_action("Agent A", "❌ [RESPOND] Login failed before opening form — aborting", level="ERROR")
+            return False
 
         log_agent_action("Agent A", f"📨 [RESPOND] Opening offer form {offer_url} (duration={duration!r})")
 
