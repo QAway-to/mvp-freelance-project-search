@@ -1062,51 +1062,63 @@ class AgentA:
         """TEMP DIAGNOSTIC: open new_offer page and dump срок dropdown options + key
         selector presence. Read-only — does NOT submit an offer. REMOVE AFTER USE."""
         import json as _json
-        if not self.driver:
-            self.setup_driver()
+        from browser import quit_driver
+
+        # Reap any wedged Chrome from a prior call: on a renderer/OOM timeout the
+        # browser process stays alive (current_url still answers) so get_driver()
+        # keeps reusing a dead session. Force a fresh one for a clean inspect.
+        quit_driver()
+        self.setup_driver()
 
         result: Dict[str, Any] = {"project_id": project_id}
 
-        # ── verbose cookie injection (capture per-cookie failures) ──
-        self.driver.get(config.KWORK_BASE_URL)
-        self.human_delay(1, 2)
-        inject = {"attempted": 0, "ok": 0, "failed": []}
-        if config.KWORK_COOKIES:
-            try:
-                raw = re.sub(r'[\x00-\x1f\x7f]', '', config.KWORK_COOKIES)
-                cookies = _json.loads(raw)
-                inject["attempted"] = len(cookies)
-                for c in cookies:
-                    clean = _normalize_cookie(c)
-                    if not clean:
-                        inject["failed"].append({"name": c.get("name"), "error": "missing name/value after normalize"})
-                        continue
-                    try:
-                        self.driver.add_cookie(clean)
-                        inject["ok"] += 1
-                    except Exception as ce:
-                        inject["failed"].append({"name": clean["name"], "domain": clean["domain"], "error": str(ce)[:120]})
-            except Exception as e:
-                inject["parse_error"] = str(e)[:200]
-        self.logged_in = True
-        result["cookie_injection"] = inject
+        def _inject() -> Dict[str, Any]:
+            """Land on the domain, inject cookies (with whitespace-corruption repair)."""
+            self.driver.get(config.KWORK_BASE_URL)
+            self.human_delay(1, 2)
+            inj: Dict[str, Any] = {"attempted": 0, "ok": 0, "failed": []}
+            if config.KWORK_COOKIES:
+                try:
+                    raw = re.sub(r'[\x00-\x1f\x7f]', '', config.KWORK_COOKIES)
+                    cookies = _json.loads(raw)
+                    inj["attempted"] = len(cookies)
+                    for c in cookies:
+                        clean = _normalize_cookie(c)
+                        if not clean:
+                            inj["failed"].append({"name": c.get("name"), "error": "missing name/value after normalize"})
+                            continue
+                        try:
+                            self.driver.add_cookie(clean)
+                            inj["ok"] += 1
+                        except Exception as ce:
+                            inj["failed"].append({"name": clean["name"], "domain": clean["domain"], "error": str(ce)[:120]})
+                except Exception as e:
+                    inj["parse_error"] = str(e)[:200]
+            self.logged_in = True
+            return inj
 
-        # ── verify login on home page ──
-        self.driver.get(config.KWORK_BASE_URL)
-        self.human_delay(2, 3)
-        result["home_url"] = self.driver.current_url
-        result["present_cookies"] = sorted(ck["name"] for ck in self.driver.get_cookies())
-        src = (self.driver.page_source or "").lower()
-        result["home_has_login_btn"] = ("войти" in src and "регистрац" in src)
-        result["home_has_logout"] = ("/logout" in src or "выйти" in src)
+        result["cookie_injection"] = _inject()
 
         url = f"https://kwork.ru/new_offer?project={project_id}"
         log_agent_action("Agent A", f"🔍 [INSPECT] Navigating to {url}")
-        self.driver.get(url)
-        self.human_delay(2, 4)
+        try:
+            self.driver.get(url)
+            self.human_delay(2, 4)
+        except Exception as e1:
+            # Renderer timeout / OOM — recreate Chrome once and retry from scratch.
+            log_agent_action("Agent A", f"⚠️ [INSPECT] nav failed ({str(e1)[:80]}); recreating driver and retrying", level="WARNING")
+            quit_driver()
+            self.setup_driver()
+            result["cookie_injection_retry"] = _inject()
+            self.driver.get(url)
+            self.human_delay(2, 4)
 
         result["final_url"] = self.driver.current_url
         result["title"] = self.driver.title
+        result["present_cookies"] = sorted(ck["name"] for ck in self.driver.get_cookies())
+        src = (self.driver.page_source or "").lower()
+        result["page_has_login_btn"] = ("войти" in src and "регистрац" in src)
+        result["page_has_logout"] = ("/logout" in src or "выйти" in src)
 
         editors = self.driver.find_elements(By.CSS_SELECTOR, "div.trumbowyg-editor")
         result["editor_found"] = len(editors)
