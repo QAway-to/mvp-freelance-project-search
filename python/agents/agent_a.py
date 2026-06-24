@@ -1046,21 +1046,51 @@ class AgentA:
     def inspect_offer_form(self, project_id: str) -> Dict[str, Any]:
         """TEMP DIAGNOSTIC: open new_offer page and dump срок dropdown options + key
         selector presence. Read-only — does NOT submit an offer. REMOVE AFTER USE."""
+        import json as _json
         if not self.driver:
             self.setup_driver()
-        if not self.logged_in:
-            self.login()
+
+        result: Dict[str, Any] = {"project_id": project_id}
+
+        # ── verbose cookie injection (capture per-cookie failures) ──
+        self.driver.get(config.KWORK_BASE_URL)
+        self.human_delay(1, 2)
+        inject = {"attempted": 0, "ok": 0, "failed": []}
+        if config.KWORK_COOKIES:
+            try:
+                raw = re.sub(r'[\x00-\x1f\x7f]', '', config.KWORK_COOKIES)
+                cookies = _json.loads(raw)
+                inject["attempted"] = len(cookies)
+                for c in cookies:
+                    try:
+                        self.driver.add_cookie({
+                            "name": c["name"], "value": c["value"],
+                            "domain": c.get("domain", ".kwork.ru"), "path": c.get("path", "/"),
+                        })
+                        inject["ok"] += 1
+                    except Exception as ce:
+                        inject["failed"].append({"name": c.get("name"), "domain": c.get("domain"), "error": str(ce)[:120]})
+            except Exception as e:
+                inject["parse_error"] = str(e)[:200]
+        self.logged_in = True
+        result["cookie_injection"] = inject
+
+        # ── verify login on home page ──
+        self.driver.get(config.KWORK_BASE_URL)
+        self.human_delay(2, 3)
+        result["home_url"] = self.driver.current_url
+        result["present_cookies"] = sorted(ck["name"] for ck in self.driver.get_cookies())
+        src = (self.driver.page_source or "").lower()
+        result["home_has_login_btn"] = ("войти" in src and "регистрац" in src)
+        result["home_has_logout"] = ("/logout" in src or "выйти" in src)
 
         url = f"https://kwork.ru/new_offer?project={project_id}"
         log_agent_action("Agent A", f"🔍 [INSPECT] Navigating to {url}")
         self.driver.get(url)
         self.human_delay(2, 4)
 
-        result: Dict[str, Any] = {
-            "project_id": project_id,
-            "final_url": self.driver.current_url,
-            "title": self.driver.title,
-        }
+        result["final_url"] = self.driver.current_url
+        result["title"] = self.driver.title
 
         editors = self.driver.find_elements(By.CSS_SELECTOR, "div.trumbowyg-editor")
         result["editor_found"] = len(editors)
