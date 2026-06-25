@@ -270,16 +270,29 @@ def auth_probe() -> dict[str, Any]:
     if not CURL_CFFI_AVAILABLE:
         return {"error": "curl_cffi unavailable"}
 
-    fav_params = SimpleNamespace(keywords_list=(), budget_filters=())
-    fav = _summary(_fetch_html(_build_url(fav_params, 1)))
-    pub = _summary(_fetch_html(f"{config.KWORK_PROJECTS_URL}?page=1"))
+    base = config.KWORK_PROJECTS_URL
+    filters = "kworks-filters[]=0&kworks-filters[]=1&prices-filters[]=3&prices-filters[]=4"
+    # 1) favourites (personalised) WITH the same budget/type filters.
+    fav = _summary(_fetch_html(f"{base}?type=favourite&{filters}&page=1"))
+    # 2) same filters but NOT favourites — isolates the personalisation effect.
+    filtered_public = _summary(_fetch_html(f"{base}?{filters}&page=1"))
+    # 3) raw public, no filters at all.
+    raw_public = _summary(_fetch_html(f"{base}?page=1"))
 
-    fav_ids = {s["id"] for s in fav["sample"]}
-    pub_ids = {s["id"] for s in pub["sample"]}
+    def ids(s):
+        return {x["id"] for x in s["sample"]}
+
     return {
         "cookies_loaded": bool(_cookies_dict()),
-        "cookie_names": sorted(_cookies_dict().keys()),
+        "auth_cookies_present": sorted(
+            c for c in _cookies_dict() if c in ("userId", "slrememberme", "csrf_user_token")
+        ),
         "favourites": fav,
-        "public": pub,
-        "favourites_differs_from_public": (fav["total"] != pub["total"]) or bool(fav_ids ^ pub_ids),
+        "filtered_public": filtered_public,
+        "raw_public": raw_public,
+        # If favourites != same-filter public, type=favourite is doing real
+        # personalisation (your favourite categories), not just budget filtering.
+        "favourites_personalisation_active": (
+            fav["total"] != filtered_public["total"] or bool(ids(fav) ^ ids(filtered_public))
+        ),
     }
