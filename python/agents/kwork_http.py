@@ -256,115 +256,66 @@ def auth_probe() -> dict[str, Any]:
     sets differ. Returns counts, sample titles (so a human can recognise their
     own favourites), and session signals. Read-only.
     """
-    from types import SimpleNamespace
-
-    def _summary(html_text: Optional[str]) -> dict[str, Any]:
-        d = _extract_state_data(html_text) if html_text else None
-        wl = (d or {}).get("wantsListData") or {}
-        wants = wl.get("wants") or []
-        return {
-            "total": (wl.get("pagination") or {}).get("total"),
-            "last_page": (wl.get("pagination") or {}).get("last_page"),
-            "sample": [{"id": w.get("id"), "title": w.get("name")} for w in wants[:5]],
-            "actorStatus": (d or {}).get("actorStatus"),
-            "actorKworkAllowStatus": (d or {}).get("actorKworkAllowStatus"),
-        }
-
     if not CURL_CFFI_AVAILABLE:
         return {"error": "curl_cffi unavailable"}
 
-    base = config.KWORK_PROJECTS_URL
-    full = _extract_state_data(_fetch_html(f"{base}?type=favourite&a=1&page=1")) or {}
-
-    # A) all top-level stateData keys (spot a favourites/settings field).
-    top_keys = sorted(full.keys())
-    # B) recursive search for fav/subscribe/select/follow flags + short id lists.
-    flag_hits: list = []
-    id_lists: list = []
-
-    def _walk(node, path=""):
-        if isinstance(node, dict):
-            for k, v in node.items():
-                kl = k.lower()
-                if any(t in kl for t in ("favor", "subscrib", "follow", "selected", "ismy")) \
-                        and v not in (None, False, 0, "", [], {}):
-                    flag_hits.append({
-                        "path": f"{path}/{k}",
-                        "value": v if not isinstance(v, (list, dict)) else f"{type(v).__name__}[{len(v)}]",
-                    })
-                _walk(v, f"{path}/{k}")
-        elif isinstance(node, list):
-            if 0 < len(node) <= 40 and all(isinstance(x, (int, str)) for x in node):
-                id_lists.append({"path": path, "len": len(node), "sample": node[:20]})
-            for i, v in enumerate(node):
-                _walk(v, f"{path}[{i}]")
-
-    _walk(full)
-
-    # C) full content of one category object (incl. 'attributes').
-    cat_dump = None
-    cwf = full.get("categoriesWithFavoritesList") or {}
-    if isinstance(cwf, dict):
-        for grp in cwf.values():
-            if isinstance(grp, dict) and grp.get("cats"):
-                cat_dump = grp["cats"][0]
-                break
-
-    # D) does X-Requested-With + CSRF make type=favourite return a filtered set?
-    csrf = _cookies_dict().get("csrf_user_token", "")
-    ajax_headers = {
-        "X-Requested-With": "XMLHttpRequest",
-        "x-csrf-token": csrf,
-        "Referer": f"{base}?type=favourite",
-    }
-    raw = _fetch_html(f"{base}?type=favourite&a=1&page=1", extra_headers=ajax_headers)
-    ajax: dict[str, Any] = {"len": len(raw) if raw else 0}
-    if raw:
-        ajax["is_json"] = False
-        try:
-            j = json.loads(raw)
-            ajax["is_json"] = True
-            ajax["json_keys"] = list(j.keys())[:25] if isinstance(j, dict) else type(j).__name__
-        except ValueError:
-            sd = _extract_state_data(raw)
-            ajax["has_stateData"] = sd is not None
-            ajax["total"] = ((sd or {}).get("wantsListData") or {}).get("pagination", {}).get("total")
-        ajax["head"] = raw[:200]
-
     cks = _cookies_dict()
+    base = "https://kwork.ru/projects"
+    csrf = cks.get("csrf_user_token", "")
+    xhr = {
+        "x-requested-with": "XMLHttpRequest",
+        "accept": "application/json, text/plain, */*",
+        "origin": "https://kwork.ru",
+        "referer": f"{base}?a=1",
+    }
+
+    def _analyze(label, r):
+        info = {"label": label}
+        if r is None:
+            info["err"] = "exception"
+            return info
+        info["status"] = r.status_code
+        info["ctype"] = (r.headers.get("content-type") or "")[:40]
+        try:
+            j = r.json()
+        except Exception:
+            info["is_json"] = False
+            info["len"] = len(r.text or "")
+            return info
+        info["is_json"] = True
+        data = j.get("data", j) if isinstance(j, dict) else {}
+        fc = data.get("favouriteCategories")
+        info["fav_cat_count"] = len(fc) if isinstance(fc, (list, dict)) else fc
+        info["wants_count"] = len(data.get("wants") or [])
+        info["total"] = (data.get("pagination") or {}).get("total")
+        return info
+
+    def _post(url, data=None):
+        try:
+            return _creq.post(url, headers={**_HEADERS, **xhr}, cookies=cks,
+                              impersonate=_IMPERSONATE, data=data, timeout=40)
+        except Exception:
+            return None
+
+    def _get(url):
+        try:
+            return _creq.get(url, headers={**_HEADERS, **xhr}, cookies=cks,
+                            impersonate=_IMPERSONATE, timeout=40)
+        except Exception:
+            return None
+
+    attempts = [
+        _analyze("POST /projects (no body)", _post(base)),
+        _analyze("POST /projects a=1", _post(base, {"a": "1"})),
+        _analyze("POST /projects a=1&page=1", _post(base, {"a": "1", "page": "1"})),
+        _analyze("POST /projects?a=1 (no body)", _post(f"{base}?a=1")),
+        _analyze("POST /projects?a=1 token", _post(f"{base}?a=1", {"token": csrf})),
+        _analyze("GET /projects?a=1 (xhr+json)", _get(f"{base}?a=1")),
+    ]
+
     user_id_cookie = cks.get("userId")
 
-    # Find the logged-in account identity: any login/username, plus where the
-    # userId cookie value appears in stateData.
-    identity = {"userId_cookie": user_id_cookie, "login_fields": [], "userId_paths": []}
-
-    def _find(node, path=""):
-        if isinstance(node, dict):
-            for k, v in node.items():
-                kl = k.lower()
-                if isinstance(v, (str, int)) and any(
-                    t in kl for t in ("login", "username", "user_name", "nick", "profileurl")
-                ) and v not in (None, "", 0):
-                    identity["login_fields"].append({"path": f"{path}/{k}", "value": v})
-                if user_id_cookie and str(v) == str(user_id_cookie) and "userId" not in path:
-                    identity["userId_paths"].append(f"{path}/{k}")
-                _find(v, f"{path}/{k}")
-        elif isinstance(node, list):
-            for i, v in enumerate(node[:30]):
-                _find(v, f"{path}[{i}]")
-
-    _find(full)
-
-    fav_cats = full.get("favouriteCategories")
     return {
-        "auth_cookies_present": sorted(
-            c for c in cks if c in ("userId", "slrememberme", "csrf_user_token")
-        ),
-        "identity": {
-            "userId_cookie": identity["userId_cookie"],
-            "login_fields": identity["login_fields"][:15],
-            "userId_appears_at": identity["userId_paths"][:10],
-        },
-        "favouriteCategories_value": fav_cats,
-        "favouriteCategoriesCount": full.get("favouriteCategoriesCount"),
+        "userId_cookie": user_id_cookie,
+        "post_attempts": attempts,
     }
