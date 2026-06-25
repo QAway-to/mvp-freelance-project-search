@@ -271,26 +271,49 @@ def auth_probe() -> dict[str, Any]:
         return {"error": "curl_cffi unavailable"}
 
     base = config.KWORK_PROJECTS_URL
-    filters = "kworks-filters[]=0&kworks-filters[]=1&prices-filters[]=3&prices-filters[]=4"
 
-    # a=1 returns full HTML+stateData (verified), so summarise it like the rest.
-    fav_a1 = _summary(_fetch_html(f"{base}?type=favourite&a=1&{filters}&page=1"))
-    fav_a1_nofilter = _summary(_fetch_html(f"{base}?type=favourite&a=1&page=1"))
-    filtered_public = _summary(_fetch_html(f"{base}?{filters}&page=1"))
+    full = _extract_state_data(_fetch_html(f"{base}?type=favourite&a=1&page=1")) or {}
 
-    def ids(s):
-        return {x["id"] for x in s["sample"]}
+    # Look for the user's favourite categories inside categoriesWithFavoritesList.
+    cwf = full.get("categoriesWithFavoritesList")
+    fav_cat_hits = []
+    structure_sample = None
+
+    def _walk(node, parent_name=None):
+        if isinstance(node, dict):
+            name = node.get("name") or node.get("h1") or parent_name
+            # any truthy key that looks like a favourite flag
+            for k, v in node.items():
+                if "favor" in k.lower() and v not in (None, False, 0, "", [], {}):
+                    fav_cat_hits.append({"name": name, "flag": k, "value": v,
+                                         "id": node.get("id") or node.get("CATID")})
+            for v in node.values():
+                _walk(v, name)
+        elif isinstance(node, list):
+            for v in node:
+                _walk(v, parent_name)
+
+    _walk(cwf)
+    # capture one raw category entry so we can see the shape
+    if isinstance(cwf, dict):
+        for v in cwf.values():
+            if isinstance(v, dict) and v.get("cats"):
+                structure_sample = {"parent_keys": list(v.keys()),
+                                    "cat0_keys": list(v["cats"][0].keys()) if v["cats"] else None,
+                                    "cat0": {k: v["cats"][0].get(k) for k in ("CATID", "id", "name")} if v["cats"] else None}
+                break
+
+    wants = (full.get("wantsListData") or {}).get("wants") or []
+    want_cats = sorted({(w.get("category_id"), None) for w in wants})
 
     return {
         "cookies_loaded": bool(_cookies_dict()),
         "auth_cookies_present": sorted(
             c for c in _cookies_dict() if c in ("userId", "slrememberme", "csrf_user_token")
         ),
-        "fav_a1": fav_a1,
-        "fav_a1_nofilter": fav_a1_nofilter,
-        "filtered_public": filtered_public,
-        # a=1 favourites really personalised if it differs from same-filter public.
-        "a1_favourites_active": (
-            fav_a1["total"] != filtered_public["total"] or bool(ids(fav_a1) ^ ids(filtered_public))
-        ),
+        "cwf_top_type": type(cwf).__name__,
+        "cwf_top_keys": list(cwf.keys())[:30] if isinstance(cwf, dict) else None,
+        "favourite_flag_hits": fav_cat_hits[:40],
+        "category_structure_sample": structure_sample,
+        "want_category_ids_sample": [w.get("category_id") for w in wants[:12]],
     }
