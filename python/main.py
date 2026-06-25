@@ -359,4 +359,9 @@ async def api_parse(request: Request):
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     log_agent_action("App", f"📡 Starting server on port {port}")
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False, log_level=config.LOG_LEVEL.lower())
+    # Pass the app OBJECT, not the "main:app" import string. The process already runs
+    # as __main__; an import string makes uvicorn re-import the module as `main`, which
+    # re-executes all top-level code (a second AgentA(), etc.) and leaves a duplicate set
+    # of objects resident — nearly doubling baseline RSS and pushing the 512MB tier to OOM.
+    # Object form loads everything once (reload/workers are off, so no import string needed).
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level=config.LOG_LEVEL.lower())
