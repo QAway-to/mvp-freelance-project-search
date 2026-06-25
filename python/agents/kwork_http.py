@@ -55,10 +55,11 @@ _TAG_RE = re.compile(r"<[^>]+>")
 # safe lever is to look like a low-volume human: space requests out, cap volume
 # per hour, and — critically — STOP (cooldown) the moment we see a challenge
 # instead of hammering it (retries under a challenge are what gets you flagged).
-_MIN_INTERVAL = float(os.getenv("KWORK_MIN_REQUEST_INTERVAL", "12"))   # sec between requests
-_HOURLY_CAP = int(os.getenv("KWORK_HOURLY_CAP", "60"))                 # max requests / hour
+_MIN_INTERVAL = float(os.getenv("KWORK_MIN_REQUEST_INTERVAL", "5"))    # sec between requests
+_HOURLY_CAP = int(os.getenv("KWORK_HOURLY_CAP", "120"))                # max requests / hour
 _CHALLENGE_COOLDOWN = float(os.getenv("KWORK_CHALLENGE_COOLDOWN", "900"))  # backoff on challenge
-_PAGES_SCAN = int(os.getenv("KWORK_PAGES_SCAN", "3"))  # last N pages to scan (most-expiring pool)
+_PAGES_PER_GROUP = int(os.getenv("KWORK_PAGES_PER_GROUP", "2"))  # newest pages per category group
+_PAGES_SCAN = int(os.getenv("KWORK_PAGES_SCAN", "3"))           # pages for the no-filter listing
 
 _rl_lock = threading.Lock()
 _last_request_ts = 0.0
@@ -282,56 +283,61 @@ def _fetch_html(url: str, use_cookies: bool = True) -> Optional[str]:
     return r.text if r is not None else None
 
 
-def _wl_from(page: int, params: Any) -> Optional[dict]:
-    """Fetch one public listing page and return its wantsListData (or None)."""
-    html = _fetch_html(_build_url(params, page), use_cookies=False)
+def _wl_from_url(url: str) -> Optional[dict]:
+    """Fetch one public listing URL and return its wantsListData (or None)."""
+    html = _fetch_html(url, use_cookies=False)
     if not html:
         return None
     return (_extract_state_data(html) or {}).get("wantsListData")
 
 
 def fetch_listing(params: Any, max_urgency_hours: float = 9999) -> list[dict[str, Any]]:
-    """Fetch the most-expiring projects over public HTTP (no Chrome, no login)
-    and filter them service-side by the UI-selected categories.
+    """Fetch projects in the user's categories over public HTTP (no Chrome, no
+    login) and keep the exact selected subcategories within the urgency window.
 
-    Kwork orders projects oldest-first, so the LAST pages hold the most-expiring
-    jobs. We scan the last KWORK_PAGES_SCAN pages to build a pool, then keep only
-    the categories the user selected (params.categories; empty = all) within the
-    urgency window. Returns [] on failure (caller falls back to Selenium).
+    Kwork's public listing filters by ?c=<id>. We fetch by TOP GROUP (one request
+    per group that contains a selected subcategory — at most 7), newest first,
+    then keep only the selected subcategory ids. Keyword searches and the
+    no-filter case fall back to the plain paged listing. [] on failure.
     """
     if not CURL_CFFI_AVAILABLE:
         log_agent_action("KworkHTTP", "curl_cffi unavailable — skipping HTTP path", level="WARNING")
         return []
     try:
+        from agents.kwork_categories import groups_for
+
         categories = set(getattr(params, "categories", ()) or ())
+        keywords = ",".join(params.keywords_list) if getattr(params, "keywords_list", None) else ""
 
-        wl1 = _wl_from(1, params)
-        if not wl1:
-            log_agent_action("KworkHTTP", "stateData.wantsListData missing — layout changed?", level="WARNING")
-            return []
-        last_page = (wl1.get("pagination") or {}).get("last_page") or 1
-        log_agent_action("KworkHTTP", f"🌐 [HTTP] last_page={last_page}, scanning last {_PAGES_SCAN}")
-
-        # Collect wants from the last N pages (most-expiring first).
         collected: list[dict[str, Any]] = []
-        if last_page <= 1:
-            collected = wl1.get("wants") or []
-            scanned_pages = {1}
+        scanned: list = []
+
+        if categories and not keywords:
+            groups = sorted(groups_for(categories))
+            log_agent_action("KworkHTTP", f"🌐 [HTTP] fetching {len(groups)} category group(s): {groups}")
+            for g in groups:
+                for page in range(1, _PAGES_PER_GROUP + 1):
+                    wl = _wl_from_url(f"{config.KWORK_PROJECTS_URL}?c={g}&page={page}")
+                    if not wl:
+                        break
+                    collected.extend(wl.get("wants") or [])
+                scanned.append(g)
         else:
-            scanned_pages = set()
-            start = max(2, last_page - _PAGES_SCAN + 1)
-            for p in range(last_page, start - 1, -1):
-                wlp = _wl_from(p, params)
-                if wlp:
-                    collected.extend(wlp.get("wants") or [])
-                    scanned_pages.add(p)
-            if not collected:
-                log_agent_action("KworkHTTP", "⚠️ [HTTP] no pages fetched — returning []", level="WARNING")
-                return []
+            # keyword search or no category filter — plain paged listing
+            for page in range(1, _PAGES_SCAN + 1):
+                wl = _wl_from_url(_build_url(params, page))
+                if not wl:
+                    break
+                collected.extend(wl.get("wants") or [])
+                scanned.append(page)
+
+        if not collected:
+            log_agent_action("KworkHTTP", "⚠️ [HTTP] nothing fetched — returning []", level="WARNING")
+            return []
 
         projects = [m for m in (_map_want(w, 0) for w in collected) if m]
 
-        # Dedupe by url (pages can overlap as the feed shifts).
+        # Dedupe by url (a project can appear under group + overlapping pages).
         seen: set = set()
         projects = [p for p in projects if not (p["url"] in seen or seen.add(p["url"]))]
 
@@ -343,7 +349,7 @@ def fetch_listing(params: Any, max_urgency_hours: float = 9999) -> list[dict[str
         log_agent_action(
             "KworkHTTP",
             f"✅ [HTTP] {len(projects)} projects "
-            f"(pages={sorted(scanned_pages)}, categories={'all' if not categories else len(categories)})",
+            f"(scanned={scanned}, categories={'all' if not categories else len(categories)})",
         )
         return projects
     except Exception as e:
