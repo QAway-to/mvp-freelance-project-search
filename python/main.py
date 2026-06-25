@@ -204,6 +204,14 @@ async def debug_info():
     }
 
 
+@app.get("/debug/kwork-auth")
+async def debug_kwork_auth():
+    """Diagnostic: verify the HTTP favourites scrape is authenticated and really
+    filtered to the user's favourites (vs the public list). Read-only."""
+    from agents.kwork_http import auth_probe
+    return await asyncio.to_thread(auth_probe)
+
+
 @app.get("/debug/offer-form")
 async def debug_offer_form(project: str):
     """TEMP DIAGNOSTIC — dump срок dropdown options + key selectors from the new_offer

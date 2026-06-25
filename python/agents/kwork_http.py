@@ -243,3 +243,43 @@ def fetch_listing(params: Any, max_urgency_hours: float = 9999) -> list[dict[str
     except Exception as e:
         log_agent_action("KworkHTTP", f"❌ [HTTP] fetch_listing failed: {e}", level="ERROR")
         return []
+
+
+def auth_probe() -> dict[str, Any]:
+    """Diagnostic: prove the favourites fetch is authenticated and really filtered.
+
+    Compares the favourites listing against the plain public listing (same
+    cookies). If cookie auth works and `type=favourite` is honoured, the two
+    sets differ. Returns counts, sample titles (so a human can recognise their
+    own favourites), and session signals. Read-only.
+    """
+    from types import SimpleNamespace
+
+    def _summary(html_text: Optional[str]) -> dict[str, Any]:
+        d = _extract_state_data(html_text) if html_text else None
+        wl = (d or {}).get("wantsListData") or {}
+        wants = wl.get("wants") or []
+        return {
+            "total": (wl.get("pagination") or {}).get("total"),
+            "last_page": (wl.get("pagination") or {}).get("last_page"),
+            "sample": [{"id": w.get("id"), "title": w.get("name")} for w in wants[:5]],
+            "actorStatus": (d or {}).get("actorStatus"),
+            "actorKworkAllowStatus": (d or {}).get("actorKworkAllowStatus"),
+        }
+
+    if not CURL_CFFI_AVAILABLE:
+        return {"error": "curl_cffi unavailable"}
+
+    fav_params = SimpleNamespace(keywords_list=(), budget_filters=())
+    fav = _summary(_fetch_html(_build_url(fav_params, 1)))
+    pub = _summary(_fetch_html(f"{config.KWORK_PROJECTS_URL}?page=1"))
+
+    fav_ids = {s["id"] for s in fav["sample"]}
+    pub_ids = {s["id"] for s in pub["sample"]}
+    return {
+        "cookies_loaded": bool(_cookies_dict()),
+        "cookie_names": sorted(_cookies_dict().keys()),
+        "favourites": fav,
+        "public": pub,
+        "favourites_differs_from_public": (fav["total"] != pub["total"]) or bool(fav_ids ^ pub_ids),
+    }
