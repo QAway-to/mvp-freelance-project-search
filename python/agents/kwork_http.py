@@ -171,12 +171,15 @@ def _build_url(params: Any, page: int) -> str:
     return url
 
 
-def _fetch_html(url: str) -> Optional[str]:
+def _fetch_html(url: str, extra_headers: Optional[dict[str, str]] = None) -> Optional[str]:
+    headers = dict(_HEADERS)
+    if extra_headers:
+        headers.update(extra_headers)
     try:
         r = _creq.get(
             url,
             impersonate=_IMPERSONATE,
-            headers=_HEADERS,
+            headers=headers,
             cookies=_cookies_dict(),
             timeout=40,
         )
@@ -271,31 +274,70 @@ def auth_probe() -> dict[str, Any]:
         return {"error": "curl_cffi unavailable"}
 
     base = config.KWORK_PROJECTS_URL
-
     full = _extract_state_data(_fetch_html(f"{base}?type=favourite&a=1&page=1")) or {}
 
-    # Look for the user's favourite categories inside categoriesWithFavoritesList.
+    # A) all top-level stateData keys (spot a favourites/settings field).
+    top_keys = sorted(full.keys())
+    # B) recursive search for fav/subscribe/select/follow flags + short id lists.
+    flag_hits: list = []
+    id_lists: list = []
+
+    def _walk(node, path=""):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                kl = k.lower()
+                if any(t in kl for t in ("favor", "subscrib", "follow", "selected", "ismy")) \
+                        and v not in (None, False, 0, "", [], {}):
+                    flag_hits.append({
+                        "path": f"{path}/{k}",
+                        "value": v if not isinstance(v, (list, dict)) else f"{type(v).__name__}[{len(v)}]",
+                    })
+                _walk(v, f"{path}/{k}")
+        elif isinstance(node, list):
+            if 0 < len(node) <= 40 and all(isinstance(x, (int, str)) for x in node):
+                id_lists.append({"path": path, "len": len(node), "sample": node[:20]})
+            for i, v in enumerate(node):
+                _walk(v, f"{path}[{i}]")
+
+    _walk(full)
+
+    # C) full content of one category object (incl. 'attributes').
+    cat_dump = None
     cwf = full.get("categoriesWithFavoritesList") or {}
-    groups = []
-    all_subcat_ids = set()
-    for key, grp in (cwf.items() if isinstance(cwf, dict) else []):
-        if not isinstance(grp, dict):
-            continue
-        cats = grp.get("cats") or []
-        sub = [{"id": str(c.get("CATID") or c.get("id")), "name": c.get("name")} for c in cats]
-        for c in sub:
-            if c["id"]:
-                all_subcat_ids.add(c["id"])
-        groups.append({
-            "parent_id": str(grp.get("CATID") or grp.get("id") or key),
-            "parent_name": grp.get("name"),
-            "subcats": sub,
-        })
+    if isinstance(cwf, dict):
+        for grp in cwf.values():
+            if isinstance(grp, dict) and grp.get("cats"):
+                cat_dump = grp["cats"][0]
+                break
+
+    # D) does X-Requested-With + CSRF make type=favourite return a filtered set?
+    csrf = _cookies_dict().get("csrf_user_token", "")
+    ajax_headers = {
+        "X-Requested-With": "XMLHttpRequest",
+        "x-csrf-token": csrf,
+        "Referer": f"{base}?type=favourite",
+    }
+    raw = _fetch_html(f"{base}?type=favourite&a=1&page=1", extra_headers=ajax_headers)
+    ajax: dict[str, Any] = {"len": len(raw) if raw else 0}
+    if raw:
+        ajax["is_json"] = False
+        try:
+            j = json.loads(raw)
+            ajax["is_json"] = True
+            ajax["json_keys"] = list(j.keys())[:25] if isinstance(j, dict) else type(j).__name__
+        except ValueError:
+            sd = _extract_state_data(raw)
+            ajax["has_stateData"] = sd is not None
+            ajax["total"] = ((sd or {}).get("wantsListData") or {}).get("pagination", {}).get("total")
+        ajax["head"] = raw[:200]
 
     return {
         "auth_cookies_present": sorted(
             c for c in _cookies_dict() if c in ("userId", "slrememberme", "csrf_user_token")
         ),
-        "favourite_categories": groups,
-        "favourite_subcat_id_count": len(all_subcat_ids),
+        "top_keys": top_keys,
+        "flag_hits": flag_hits[:50],
+        "short_id_lists": id_lists[:30],
+        "category_object_dump": cat_dump,
+        "ajax_with_xrw": ajax,
     }
