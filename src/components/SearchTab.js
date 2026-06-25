@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef } from 'react'
 import { useLocalStorage } from '../hooks/useLocalStorage'
-import { KWORK_CATEGORY_GROUPS } from '../constants/kworkCategories'
+import { KWORK_CATEGORY_GROUPS, DEFAULT_FAVOURITE_CATEGORY_IDS } from '../constants/kworkCategories'
 
 export default function SearchTab({ onSearch, isLoading }) {
   const [timeLeft, setTimeLeft] = useState('72')
   const [hiredMin, setHiredMin] = useState('')
   const [proposalsMax, setProposalsMax] = useState('')
-  // Persisted: the categories the user works with. Empty = no filter (all).
-  const [categories, setCategories] = useLocalStorage('kwork_categories', [])
+  // Persisted: the categories the user works with. Defaults to the user's known
+  // favourites on first load; empty = no filter (all).
+  const [categories, setCategories] = useLocalStorage('kwork_categories', DEFAULT_FAVOURITE_CATEGORY_IDS)
   const [showCats, setShowCats] = useState(false)
   const onSearchRef = useRef(onSearch)
 

@@ -1,6 +1,13 @@
 // Kwork project categories (subcategory id -> name), grouped by top category.
 // Used by the search UI to let the user pick which categories to keep; the
 // selected ids are sent to the backend and filtered service-side by category_id.
+
+// The user's favourite categories (captured from their Kwork account) — used as
+// the default selection on first load (until they change it; persisted after).
+export const DEFAULT_FAVOURITE_CATEGORY_IDS = [
+  '20', '24', '38', '39', '40', '41', '47', '49', '55', '56', '72', '80',
+  '81', '84', '106', '108', '112', '113', '235', '255', '262', '265', '270', '300',
+]
 export const KWORK_CATEGORY_GROUPS = [
   {
     id: '17',
