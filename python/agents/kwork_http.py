@@ -331,16 +331,40 @@ def auth_probe() -> dict[str, Any]:
             ajax["total"] = ((sd or {}).get("wantsListData") or {}).get("pagination", {}).get("total")
         ajax["head"] = raw[:200]
 
+    cks = _cookies_dict()
+    user_id_cookie = cks.get("userId")
+
+    # Find the logged-in account identity: any login/username, plus where the
+    # userId cookie value appears in stateData.
+    identity = {"userId_cookie": user_id_cookie, "login_fields": [], "userId_paths": []}
+
+    def _find(node, path=""):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                kl = k.lower()
+                if isinstance(v, (str, int)) and any(
+                    t in kl for t in ("login", "username", "user_name", "nick", "profileurl")
+                ) and v not in (None, "", 0):
+                    identity["login_fields"].append({"path": f"{path}/{k}", "value": v})
+                if user_id_cookie and str(v) == str(user_id_cookie) and "userId" not in path:
+                    identity["userId_paths"].append(f"{path}/{k}")
+                _find(v, f"{path}/{k}")
+        elif isinstance(node, list):
+            for i, v in enumerate(node[:30]):
+                _find(v, f"{path}[{i}]")
+
+    _find(full)
+
     fav_cats = full.get("favouriteCategories")
     return {
         "auth_cookies_present": sorted(
-            c for c in _cookies_dict() if c in ("userId", "slrememberme", "csrf_user_token")
+            c for c in cks if c in ("userId", "slrememberme", "csrf_user_token")
         ),
-        "favouriteCategoriesCount": full.get("favouriteCategoriesCount"),
-        "favouriteCategories_type": type(fav_cats).__name__,
+        "identity": {
+            "userId_cookie": identity["userId_cookie"],
+            "login_fields": identity["login_fields"][:15],
+            "userId_appears_at": identity["userId_paths"][:10],
+        },
         "favouriteCategories_value": fav_cats,
-        "favouriteCategories_len": len(fav_cats) if isinstance(fav_cats, (list, dict)) else None,
-        "isWantsOnly": full.get("isWantsOnly"),
-        "wantsFromAllRubrics": full.get("wantsFromAllRubrics"),
-        "needFillWantsFromAllRubrics": full.get("needFillWantsFromAllRubrics"),
+        "favouriteCategoriesCount": full.get("favouriteCategoriesCount"),
     }
