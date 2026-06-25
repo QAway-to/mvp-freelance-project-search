@@ -331,13 +331,16 @@ def auth_probe() -> dict[str, Any]:
             ajax["total"] = ((sd or {}).get("wantsListData") or {}).get("pagination", {}).get("total")
         ajax["head"] = raw[:200]
 
+    fav_cats = full.get("favouriteCategories")
     return {
         "auth_cookies_present": sorted(
             c for c in _cookies_dict() if c in ("userId", "slrememberme", "csrf_user_token")
         ),
-        "top_keys": top_keys,
-        "flag_hits": flag_hits[:50],
-        "short_id_lists": id_lists[:30],
-        "category_object_dump": cat_dump,
-        "ajax_with_xrw": ajax,
+        "favouriteCategoriesCount": full.get("favouriteCategoriesCount"),
+        "favouriteCategories_type": type(fav_cats).__name__,
+        "favouriteCategories_value": fav_cats,
+        "favouriteCategories_len": len(fav_cats) if isinstance(fav_cats, (list, dict)) else None,
+        "isWantsOnly": full.get("isWantsOnly"),
+        "wantsFromAllRubrics": full.get("wantsFromAllRubrics"),
+        "needFillWantsFromAllRubrics": full.get("needFillWantsFromAllRubrics"),
     }
