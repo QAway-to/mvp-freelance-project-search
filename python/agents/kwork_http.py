@@ -242,15 +242,22 @@ def _map_want(want: dict[str, Any], page: int) -> Optional[dict[str, Any]]:
         return None
     price = want.get("priceLimit")
     try:
-        budget = f"до {int(float(price))} ₽" if price is not None else "не указан"
+        budget_value = float(price) if price is not None else None
     except (TypeError, ValueError):
-        budget = str(price) if price is not None else "не указан"
+        budget_value = None
+    budget = f"до {int(budget_value)} ₽" if budget_value is not None else "не указан"
     # proposals: coerce to int|None to match the Selenium path's schema.
     kc = want.get("kwork_count")
     try:
         proposals = int(kc) if kc is not None else None
     except (TypeError, ValueError):
         proposals = None
+    # hired = the client's hire rate % (user.data.wants_hired_percent).
+    udata = (want.get("user") or {}).get("data") or {}
+    try:
+        hired = int(udata["wants_hired_percent"]) if udata.get("wants_hired_percent") is not None else None
+    except (TypeError, ValueError):
+        hired = None
     time_left = want.get("timeLeft") or ""
     return {
         "id": str(wid),
@@ -261,7 +268,8 @@ def _map_want(want: dict[str, Any], page: int) -> Optional[dict[str, Any]]:
         "budget": budget,
         "description": _clean_desc(want.get("description")),
         "proposals": proposals,
-        "hired": None,
+        "hired": hired,
+        "budget_value": budget_value,
         "category_id": str(want.get("category_id") or ""),
         "page": page,
         "found_at": datetime.now().isoformat(),

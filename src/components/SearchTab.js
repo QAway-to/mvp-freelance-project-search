@@ -6,6 +6,8 @@ export default function SearchTab({ onSearch, isLoading }) {
   const [timeLeft, setTimeLeft] = useState('72')
   const [hiredMin, setHiredMin] = useState('')
   const [proposalsMax, setProposalsMax] = useState('')
+  const [budgetMin, setBudgetMin] = useState('')
+  const [budgetMax, setBudgetMax] = useState('')
   // Persisted: the categories the user works with. Defaults to the user's known
   // favourites on first load; empty = no filter (all).
   const [categories, setCategories] = useLocalStorage('kwork_categories', DEFAULT_FAVOURITE_CATEGORY_IDS)
@@ -36,6 +38,8 @@ export default function SearchTab({ onSearch, isLoading }) {
     timeLeft: timeLeft ? parseInt(timeLeft, 10) : null,
     hiredMin: hiredMin ? parseInt(hiredMin, 10) : null,
     proposalsMax: proposalsMax ? parseInt(proposalsMax, 10) : null,
+    budgetMin: budgetMin ? parseInt(budgetMin, 10) : null,
+    budgetMax: budgetMax ? parseInt(budgetMax, 10) : null,
     categories,
   })
 
@@ -78,6 +82,30 @@ export default function SearchTab({ onSearch, isLoading }) {
             type="number"
             value={proposalsMax}
             onChange={(e) => setProposalsMax(e.target.value)}
+            placeholder="макс"
+            min="0"
+            className="form-input-inline"
+            disabled={isLoading}
+          />
+        </div>
+        <div className="form-field-inline">
+          <label className="form-label-inline">₽ ≥</label>
+          <input
+            type="number"
+            value={budgetMin}
+            onChange={(e) => setBudgetMin(e.target.value)}
+            placeholder="мин"
+            min="0"
+            className="form-input-inline"
+            disabled={isLoading}
+          />
+        </div>
+        <div className="form-field-inline">
+          <label className="form-label-inline">₽ ≤</label>
+          <input
+            type="number"
+            value={budgetMax}
+            onChange={(e) => setBudgetMax(e.target.value)}
             placeholder="макс"
             min="0"
             className="form-input-inline"

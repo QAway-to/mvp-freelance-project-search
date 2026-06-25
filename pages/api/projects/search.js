@@ -9,11 +9,11 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
-  const { keywords, timeLeft, hiredMin, proposalsMax, categories } = req.body
+  const { keywords, timeLeft, hiredMin, proposalsMax, budgetMin, budgetMax, categories } = req.body
 
   let result
   try {
-    result = await searchProjects({ keywords, timeLeft, hiredMin, proposalsMax, categories })
+    result = await searchProjects({ keywords, timeLeft, hiredMin, proposalsMax, budgetMin, budgetMax, categories })
   } catch {
     return res.status(502).json({ status: 'error', message: 'UPSTREAM_DOWN' })
   }
