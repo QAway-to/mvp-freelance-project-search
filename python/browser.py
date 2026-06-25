@@ -17,6 +17,16 @@ def _build_options() -> uc.ChromeOptions:
     options.add_argument("--disable-background-networking")
     options.add_argument("--disable-default-apps")
     options.add_argument("--no-first-run")
+    # --- Memory diet for the 512MB Render free tier (OOM control) ---
+    # We only read text from cards, so kill everything that inflates Chrome RSS.
+    options.add_argument("--blink-settings=imagesEnabled=false")  # don't decode/keep images
+    options.add_argument("--renderer-process-limit=1")            # one renderer, not one per site
+    options.add_argument("--no-zygote")                           # fewer helper processes
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-software-rasterizer")
+    options.add_argument("--disable-background-timer-throttling")
+    options.add_argument("--disk-cache-size=0")                   # no on-disk/in-mem cache growth
+    options.add_argument("--js-flags=--max-old-space-size=256")   # cap V8 heap
     options.page_load_strategy = "eager"
     return options
 
