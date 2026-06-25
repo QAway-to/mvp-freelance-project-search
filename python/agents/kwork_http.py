@@ -18,7 +18,12 @@ from __future__ import annotations
 import functools
 import html as _html
 import json
+import os
+import random
 import re
+import threading
+import time as _time
+from collections import deque
 from datetime import datetime
 from typing import Any, Optional
 from urllib.parse import quote_plus
@@ -44,6 +49,110 @@ _HEADERS = {
 }
 
 _TAG_RE = re.compile(r"<[^>]+>")
+
+# --- Rate limiting + anti-bot (Qrator) challenge backoff --------------------
+# Kwork sits behind Qrator. We can't fake the behavioural beacons, so the only
+# safe lever is to look like a low-volume human: space requests out, cap volume
+# per hour, and — critically — STOP (cooldown) the moment we see a challenge
+# instead of hammering it (retries under a challenge are what gets you flagged).
+_MIN_INTERVAL = float(os.getenv("KWORK_MIN_REQUEST_INTERVAL", "12"))   # sec between requests
+_HOURLY_CAP = int(os.getenv("KWORK_HOURLY_CAP", "60"))                 # max requests / hour
+_CHALLENGE_COOLDOWN = float(os.getenv("KWORK_CHALLENGE_COOLDOWN", "900"))  # backoff on challenge
+
+_rl_lock = threading.Lock()
+_last_request_ts = 0.0
+_request_times: deque = deque()   # request timestamps within the trailing hour
+_cooldown_until = 0.0
+
+_CHALLENGE_MARKERS = (
+    "qrator", "captcha", "ddos-guard", "проверка браузера",
+    "checking your browser", "are you a robot", "doctype html public",
+)
+
+
+class RateLimited(Exception):
+    """Raised internally when the hourly cap is hit or we are in cooldown."""
+
+
+def _respect_rate_limit() -> None:
+    """Block until it is polite to make the next request, or refuse (RateLimited)."""
+    global _last_request_ts
+    with _rl_lock:
+        now = _time.time()
+        if now < _cooldown_until:
+            raise RateLimited(f"anti-bot cooldown, {int(_cooldown_until - now)}s left")
+        while _request_times and now - _request_times[0] > 3600:
+            _request_times.popleft()
+        if len(_request_times) >= _HOURLY_CAP:
+            raise RateLimited(f"hourly cap {_HOURLY_CAP} reached")
+        wait = (_last_request_ts + _MIN_INTERVAL) - now
+    if wait > 0:
+        _time.sleep(wait + random.uniform(0.5, 2.5))  # jitter — avoid clockwork timing
+    with _rl_lock:
+        _last_request_ts = _time.time()
+        _request_times.append(_last_request_ts)
+
+
+def _trigger_cooldown(reason: str) -> None:
+    global _cooldown_until
+    with _rl_lock:
+        _cooldown_until = _time.time() + _CHALLENGE_COOLDOWN
+    log_agent_action(
+        "KworkHTTP",
+        f"🛑 [ANTI-BOT] challenge detected ({reason}) — backing off {int(_CHALLENGE_COOLDOWN)}s, no retries",
+        level="ERROR",
+    )
+
+
+def _looks_like_challenge(status: int, text: str, expect_json: bool) -> Optional[str]:
+    if status in (403, 429, 503):
+        return f"status={status}"
+    head = (text or "")[:2000].lower()
+    for m in _CHALLENGE_MARKERS:
+        if m in head:
+            return f"marker:{m}"
+    if expect_json:
+        stripped = (text or "").lstrip()
+        if stripped and stripped[0] not in "{[":
+            return "expected-json-got-other"
+    return None
+
+
+def _request(method: str, url: str, *, expect_json: bool = False,
+             data: Optional[dict] = None, extra_headers: Optional[dict] = None):
+    """Single choke point for every Kwork request: rate-limited + challenge-aware.
+
+    Returns the curl_cffi response, or None (rate-limited, error, non-200, or a
+    detected anti-bot challenge — in which case a cooldown is also armed).
+    """
+    if not CURL_CFFI_AVAILABLE:
+        return None
+    try:
+        _respect_rate_limit()
+    except RateLimited as e:
+        log_agent_action("KworkHTTP", f"⏳ [RATE] request skipped: {e}", level="WARNING")
+        return None
+    headers = dict(_HEADERS)
+    if extra_headers:
+        headers.update(extra_headers)
+    try:
+        if method == "POST":
+            r = _creq.post(url, headers=headers, cookies=_cookies_dict(),
+                           impersonate=_IMPERSONATE, data=data, timeout=40)
+        else:
+            r = _creq.get(url, headers=headers, cookies=_cookies_dict(),
+                          impersonate=_IMPERSONATE, timeout=40)
+    except Exception as e:
+        log_agent_action("KworkHTTP", f"❌ [HTTP] {method} error: {e}", level="ERROR")
+        return None
+    challenge = _looks_like_challenge(r.status_code, r.text, expect_json)
+    if challenge:
+        _trigger_cooldown(challenge)
+        return None
+    if r.status_code != 200:
+        log_agent_action("KworkHTTP", f"⚠️ [HTTP] {method} status {r.status_code} for {url}", level="WARNING")
+        return None
+    return r
 
 
 @functools.lru_cache(maxsize=1)
@@ -172,24 +281,8 @@ def _build_url(params: Any, page: int) -> str:
 
 
 def _fetch_html(url: str, extra_headers: Optional[dict[str, str]] = None) -> Optional[str]:
-    headers = dict(_HEADERS)
-    if extra_headers:
-        headers.update(extra_headers)
-    try:
-        r = _creq.get(
-            url,
-            impersonate=_IMPERSONATE,
-            headers=headers,
-            cookies=_cookies_dict(),
-            timeout=40,
-        )
-    except Exception as e:
-        log_agent_action("KworkHTTP", f"❌ [HTTP] request error: {e}", level="ERROR")
-        return None
-    if r.status_code != 200:
-        log_agent_action("KworkHTTP", f"⚠️ [HTTP] status {r.status_code} for {url}", level="WARNING")
-        return None
-    return r.text
+    r = _request("GET", url, expect_json=False, extra_headers=extra_headers)
+    return r.text if r is not None else None
 
 
 def fetch_listing(params: Any, max_urgency_hours: float = 9999) -> list[dict[str, Any]]:
@@ -249,73 +342,43 @@ def fetch_listing(params: Any, max_urgency_hours: float = 9999) -> list[dict[str
 
 
 def auth_probe() -> dict[str, Any]:
-    """Diagnostic: prove the favourites fetch is authenticated and really filtered.
-
-    Compares the favourites listing against the plain public listing (same
-    cookies). If cookie auth works and `type=favourite` is honoured, the two
-    sets differ. Returns counts, sample titles (so a human can recognise their
-    own favourites), and session signals. Read-only.
+    """Diagnostic (conservative): ONE request through the rate limiter to find
+    the favourites feed. Tries POST /projects (XHR + JSON accept, no body) and
+    reports whether it returns the user's favouriteCategories + filtered wants.
+    Read-only.
     """
     if not CURL_CFFI_AVAILABLE:
         return {"error": "curl_cffi unavailable"}
 
-    cks = _cookies_dict()
     base = "https://kwork.ru/projects"
-    csrf = cks.get("csrf_user_token", "")
     xhr = {
         "x-requested-with": "XMLHttpRequest",
         "accept": "application/json, text/plain, */*",
         "origin": "https://kwork.ru",
         "referer": f"{base}?a=1",
     }
+    r = _request("POST", base, expect_json=True, extra_headers=xhr)  # single request
 
-    def _analyze(label, r):
-        info = {"label": label}
-        if r is None:
-            info["err"] = "exception"
-            return info
-        info["status"] = r.status_code
-        info["ctype"] = (r.headers.get("content-type") or "")[:40]
-        try:
-            j = r.json()
-        except Exception:
-            info["is_json"] = False
-            info["len"] = len(r.text or "")
-            return info
-        info["is_json"] = True
-        data = j.get("data", j) if isinstance(j, dict) else {}
-        fc = data.get("favouriteCategories")
-        info["fav_cat_count"] = len(fc) if isinstance(fc, (list, dict)) else fc
-        info["wants_count"] = len(data.get("wants") or [])
-        info["total"] = (data.get("pagination") or {}).get("total")
+    info: dict[str, Any] = {"userId_cookie": _cookies_dict().get("userId"),
+                            "request": "POST /projects (XHR, no body)"}
+    if r is None:
+        info["result"] = "no response (rate-limited, error, or anti-bot cooldown)"
         return info
-
-    def _post(url, data=None):
-        try:
-            return _creq.post(url, headers={**_HEADERS, **xhr}, cookies=cks,
-                              impersonate=_IMPERSONATE, data=data, timeout=40)
-        except Exception:
-            return None
-
-    def _get(url):
-        try:
-            return _creq.get(url, headers={**_HEADERS, **xhr}, cookies=cks,
-                            impersonate=_IMPERSONATE, timeout=40)
-        except Exception:
-            return None
-
-    attempts = [
-        _analyze("POST /projects (no body)", _post(base)),
-        _analyze("POST /projects a=1", _post(base, {"a": "1"})),
-        _analyze("POST /projects a=1&page=1", _post(base, {"a": "1", "page": "1"})),
-        _analyze("POST /projects?a=1 (no body)", _post(f"{base}?a=1")),
-        _analyze("POST /projects?a=1 token", _post(f"{base}?a=1", {"token": csrf})),
-        _analyze("GET /projects?a=1 (xhr+json)", _get(f"{base}?a=1")),
-    ]
-
-    user_id_cookie = cks.get("userId")
-
-    return {
-        "userId_cookie": user_id_cookie,
-        "post_attempts": attempts,
-    }
+    info["status"] = r.status_code
+    info["ctype"] = (r.headers.get("content-type") or "")[:40]
+    try:
+        j = r.json()
+    except Exception:
+        info["is_json"] = False
+        info["len"] = len(r.text or "")
+        info["head"] = (r.text or "")[:200]
+        return info
+    info["is_json"] = True
+    data = j.get("data", j) if isinstance(j, dict) else {}
+    fc = data.get("favouriteCategories")
+    info["fav_cat_count"] = len(fc) if isinstance(fc, (list, dict)) else fc
+    info["fav_cat_ids"] = sorted(fc.keys()) if isinstance(fc, dict) else None
+    info["wants_count"] = len(data.get("wants") or [])
+    info["total"] = (data.get("pagination") or {}).get("total")
+    info["sample"] = [{"id": w.get("id"), "title": w.get("name")} for w in (data.get("wants") or [])[:5]]
+    return info
