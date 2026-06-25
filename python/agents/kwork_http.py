@@ -275,45 +275,27 @@ def auth_probe() -> dict[str, Any]:
     full = _extract_state_data(_fetch_html(f"{base}?type=favourite&a=1&page=1")) or {}
 
     # Look for the user's favourite categories inside categoriesWithFavoritesList.
-    cwf = full.get("categoriesWithFavoritesList")
-    fav_cat_hits = []
-    structure_sample = None
-
-    def _walk(node, parent_name=None):
-        if isinstance(node, dict):
-            name = node.get("name") or node.get("h1") or parent_name
-            # any truthy key that looks like a favourite flag
-            for k, v in node.items():
-                if "favor" in k.lower() and v not in (None, False, 0, "", [], {}):
-                    fav_cat_hits.append({"name": name, "flag": k, "value": v,
-                                         "id": node.get("id") or node.get("CATID")})
-            for v in node.values():
-                _walk(v, name)
-        elif isinstance(node, list):
-            for v in node:
-                _walk(v, parent_name)
-
-    _walk(cwf)
-    # capture one raw category entry so we can see the shape
-    if isinstance(cwf, dict):
-        for v in cwf.values():
-            if isinstance(v, dict) and v.get("cats"):
-                structure_sample = {"parent_keys": list(v.keys()),
-                                    "cat0_keys": list(v["cats"][0].keys()) if v["cats"] else None,
-                                    "cat0": {k: v["cats"][0].get(k) for k in ("CATID", "id", "name")} if v["cats"] else None}
-                break
-
-    wants = (full.get("wantsListData") or {}).get("wants") or []
-    want_cats = sorted({(w.get("category_id"), None) for w in wants})
+    cwf = full.get("categoriesWithFavoritesList") or {}
+    groups = []
+    all_subcat_ids = set()
+    for key, grp in (cwf.items() if isinstance(cwf, dict) else []):
+        if not isinstance(grp, dict):
+            continue
+        cats = grp.get("cats") or []
+        sub = [{"id": str(c.get("CATID") or c.get("id")), "name": c.get("name")} for c in cats]
+        for c in sub:
+            if c["id"]:
+                all_subcat_ids.add(c["id"])
+        groups.append({
+            "parent_id": str(grp.get("CATID") or grp.get("id") or key),
+            "parent_name": grp.get("name"),
+            "subcats": sub,
+        })
 
     return {
-        "cookies_loaded": bool(_cookies_dict()),
         "auth_cookies_present": sorted(
             c for c in _cookies_dict() if c in ("userId", "slrememberme", "csrf_user_token")
         ),
-        "cwf_top_type": type(cwf).__name__,
-        "cwf_top_keys": list(cwf.keys())[:30] if isinstance(cwf, dict) else None,
-        "favourite_flag_hits": fav_cat_hits[:40],
-        "category_structure_sample": structure_sample,
-        "want_category_ids_sample": [w.get("category_id") for w in wants[:12]],
+        "favourite_categories": groups,
+        "favourite_subcat_id_count": len(all_subcat_ids),
     }
