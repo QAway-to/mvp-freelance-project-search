@@ -3,6 +3,7 @@ uvicorn[standard]==0.24.0
 selenium==4.15.2
 undetected-chromedriver>=3.5.5
 webdriver-manager>=4.0.0
+curl_cffi>=0.7.0,<1.0
 fake-useragent==1.4.0
 python-telegram-bot==20.7
 python-dotenv==1.0.0

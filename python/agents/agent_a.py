@@ -411,6 +411,31 @@ class AgentA:
 
         log_agent_action("Agent A", f"[SEARCH] _search_real_projects start: driver={self.driver is not None} logged_in={self.logged_in}")
 
+        # --- HTTP-first listing: no headless Chrome → no OOM on the 512MB tier. ---
+        # Anti-detect preserved at the network layer (Chrome TLS via curl_cffi +
+        # KWORK_COOKIES). Falls back to the Selenium scrape below if HTTP yields
+        # nothing (e.g. cookies expired in favourites mode or layout changed).
+        try:
+            from agents.kwork_http import fetch_listing
+            http_projects = fetch_listing(params, getattr(params, "max_urgency_hours", 9999))
+        except Exception as e:
+            import traceback
+            log_agent_action("Agent A", f"[SEARCH] HTTP path raised: {e} — falling back to Selenium\n{traceback.format_exc()}", level="WARNING")
+            http_projects = []
+        if http_projects:
+            seen_urls: set = set()
+            unique: list = []
+            for p in http_projects:
+                u = p.get("url", "")
+                if u and u not in seen_urls:
+                    seen_urls.add(u)
+                    unique.append(p)
+            for p in unique:
+                p.setdefault("evaluation", {"score": 1.0, "reasons": [], "suitable": True})
+            log_agent_action("Agent A", f"📋 [HTTP] Returning {len(unique)} projects (Chrome-free path)")
+            return unique
+        log_agent_action("Agent A", "[SEARCH] HTTP path empty — falling back to Selenium scrape", level="WARNING")
+
         if not self.driver:
             log_agent_action("Agent A", "[SEARCH] driver is None — calling setup_driver()")
             try:
