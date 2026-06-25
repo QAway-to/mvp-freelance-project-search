@@ -273,27 +273,24 @@ def auth_probe() -> dict[str, Any]:
     base = config.KWORK_PROJECTS_URL
     filters = "kworks-filters[]=0&kworks-filters[]=1&prices-filters[]=3&prices-filters[]=4"
 
-    # AJAX favourites (a=1) — the mode the old Selenium flow used. Inspect its
-    # raw shape so we can adapt the parser (JSON fragment vs HTML+stateData).
-    ajax_url = f"{base}?type=favourite&a=1&{filters}&page=1"
-    ajax = _fetch_html(ajax_url)
-    ajax_info: dict[str, Any] = {"len": len(ajax) if ajax else 0}
-    if ajax:
-        ajax_info["head"] = ajax[:400]
-        ajax_info["has_stateData"] = "stateData=" in ajax
-        try:
-            parsed = json.loads(ajax)
-            ajax_info["is_json"] = True
-            ajax_info["json_keys"] = (
-                list(parsed.keys())[:25] if isinstance(parsed, dict) else f"type={type(parsed).__name__}"
-            )
-        except ValueError:
-            ajax_info["is_json"] = False
+    # a=1 returns full HTML+stateData (verified), so summarise it like the rest.
+    fav_a1 = _summary(_fetch_html(f"{base}?type=favourite&a=1&{filters}&page=1"))
+    fav_a1_nofilter = _summary(_fetch_html(f"{base}?type=favourite&a=1&page=1"))
+    filtered_public = _summary(_fetch_html(f"{base}?{filters}&page=1"))
+
+    def ids(s):
+        return {x["id"] for x in s["sample"]}
 
     return {
         "cookies_loaded": bool(_cookies_dict()),
         "auth_cookies_present": sorted(
             c for c in _cookies_dict() if c in ("userId", "slrememberme", "csrf_user_token")
         ),
-        "ajax_favourites_probe": ajax_info,
+        "fav_a1": fav_a1,
+        "fav_a1_nofilter": fav_a1_nofilter,
+        "filtered_public": filtered_public,
+        # a=1 favourites really personalised if it differs from same-filter public.
+        "a1_favourites_active": (
+            fav_a1["total"] != filtered_public["total"] or bool(ids(fav_a1) ^ ids(filtered_public))
+        ),
     }
