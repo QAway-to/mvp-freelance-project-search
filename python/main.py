@@ -204,14 +204,6 @@ async def debug_info():
     }
 
 
-@app.get("/debug/kwork-auth")
-async def debug_kwork_auth():
-    """Diagnostic: verify the HTTP favourites scrape is authenticated and really
-    filtered to the user's favourites (vs the public list). Read-only."""
-    from agents.kwork_http import auth_probe
-    return await asyncio.to_thread(auth_probe)
-
-
 @app.get("/debug/offer-form")
 async def debug_offer_form(project: str):
     """TEMP DIAGNOSTIC — dump срок dropdown options + key selectors from the new_offer
@@ -242,9 +234,11 @@ async def api_search(request: Request):
     max_urgency = int(data["timeLeft"]) if data.get("timeLeft") is not None else 9999
 
     keywords_list = tuple(kw.strip() for kw in keywords.split(",") if kw.strip()) if keywords else ()
+    categories = tuple(str(c).strip() for c in (data.get("categories") or []) if str(c).strip())
     params = SearchParams(
         keywords_list=keywords_list,
         max_urgency_hours=max_urgency,
+        categories=categories,
     )
 
     log_agent_action("API", f"[SEARCH] request received: keywords={keywords!r} mode={config.MODE} driver={agent_a.driver is not None} logged_in={agent_a.logged_in}")

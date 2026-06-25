@@ -58,6 +58,7 @@ _TAG_RE = re.compile(r"<[^>]+>")
 _MIN_INTERVAL = float(os.getenv("KWORK_MIN_REQUEST_INTERVAL", "12"))   # sec between requests
 _HOURLY_CAP = int(os.getenv("KWORK_HOURLY_CAP", "60"))                 # max requests / hour
 _CHALLENGE_COOLDOWN = float(os.getenv("KWORK_CHALLENGE_COOLDOWN", "900"))  # backoff on challenge
+_PAGES_SCAN = int(os.getenv("KWORK_PAGES_SCAN", "3"))  # last N pages to scan (most-expiring pool)
 
 _rl_lock = threading.Lock()
 _last_request_ts = 0.0
@@ -119,11 +120,14 @@ def _looks_like_challenge(status: int, text: str, expect_json: bool) -> Optional
 
 
 def _request(method: str, url: str, *, expect_json: bool = False,
-             data: Optional[dict] = None, extra_headers: Optional[dict] = None):
+             data: Optional[dict] = None, extra_headers: Optional[dict] = None,
+             use_cookies: bool = True):
     """Single choke point for every Kwork request: rate-limited + challenge-aware.
 
-    Returns the curl_cffi response, or None (rate-limited, error, non-200, or a
-    detected anti-bot challenge — in which case a cooldown is also armed).
+    `use_cookies=False` makes the request anonymous (the project search needs no
+    login, so it stays decoupled from the account — search can never get the
+    account flagged). Returns the curl_cffi response, or None (rate-limited,
+    error, non-200, or a detected anti-bot challenge — which also arms a cooldown).
     """
     if not CURL_CFFI_AVAILABLE:
         return None
@@ -135,12 +139,13 @@ def _request(method: str, url: str, *, expect_json: bool = False,
     headers = dict(_HEADERS)
     if extra_headers:
         headers.update(extra_headers)
+    cookies = _cookies_dict() if use_cookies else None
     try:
         if method == "POST":
-            r = _creq.post(url, headers=headers, cookies=_cookies_dict(),
+            r = _creq.post(url, headers=headers, cookies=cookies,
                            impersonate=_IMPERSONATE, data=data, timeout=40)
         else:
-            r = _creq.get(url, headers=headers, cookies=_cookies_dict(),
+            r = _creq.get(url, headers=headers, cookies=cookies,
                           impersonate=_IMPERSONATE, timeout=40)
     except Exception as e:
         log_agent_action("KworkHTTP", f"❌ [HTTP] {method} error: {e}", level="ERROR")
@@ -256,129 +261,91 @@ def _map_want(want: dict[str, Any], page: int) -> Optional[dict[str, Any]]:
         "description": _clean_desc(want.get("description")),
         "proposals": proposals,
         "hired": None,
+        "category_id": str(want.get("category_id") or ""),
         "page": page,
         "found_at": datetime.now().isoformat(),
     }
 
 
 def _build_url(params: Any, page: int) -> str:
+    """Public projects listing URL. Search needs no auth; category filtering is
+    done service-side (Kwork's own favourites filter can't be replicated over
+    HTTP — it requires an un-forgeable Qrator behavioural beacon)."""
     keywords = ",".join(params.keywords_list) if getattr(params, "keywords_list", None) else ""
     if keywords:
         return f"{config.KWORK_PROJECTS_URL}?keyword={quote_plus(keywords)}&page={page}"
-    # Favourites listing as a full HTML page (no a=1) so stateData is embedded.
-    url = (
-        f"{config.KWORK_PROJECTS_URL}?type=favourite"
-        f"&kworks-filters[]=0&kworks-filters[]=1"
-        f"&prices-filters[]=3&prices-filters[]=4&page={page}"
-    )
-    # Forward any extra budget filters, matching the Selenium path.
-    budget_qs = "&".join(
-        f"prices-filters[]={f}" for f in (getattr(params, "budget_filters", None) or ())
-    )
-    if budget_qs:
-        url += f"&{budget_qs}"
-    return url
+    return f"{config.KWORK_PROJECTS_URL}?page={page}"
 
 
-def _fetch_html(url: str, extra_headers: Optional[dict[str, str]] = None) -> Optional[str]:
-    r = _request("GET", url, expect_json=False, extra_headers=extra_headers)
+def _fetch_html(url: str, use_cookies: bool = True) -> Optional[str]:
+    r = _request("GET", url, expect_json=False, use_cookies=use_cookies)
     return r.text if r is not None else None
 
 
-def fetch_listing(params: Any, max_urgency_hours: float = 9999) -> list[dict[str, Any]]:
-    """Fetch the LAST listing page (most-expiring jobs) over HTTP, no Chrome.
+def _wl_from(page: int, params: Any) -> Optional[dict]:
+    """Fetch one public listing page and return its wantsListData (or None)."""
+    html = _fetch_html(_build_url(params, page), use_cookies=False)
+    if not html:
+        return None
+    return (_extract_state_data(html) or {}).get("wantsListData")
 
-    Returns a list of project dicts, or [] on any failure (caller falls back to
-    the Selenium scrape). Kwork orders projects oldest-first, so the last page
-    holds the most-expiring jobs — exactly the ones worth bidding on early.
+
+def fetch_listing(params: Any, max_urgency_hours: float = 9999) -> list[dict[str, Any]]:
+    """Fetch the most-expiring projects over public HTTP (no Chrome, no login)
+    and filter them service-side by the UI-selected categories.
+
+    Kwork orders projects oldest-first, so the LAST pages hold the most-expiring
+    jobs. We scan the last KWORK_PAGES_SCAN pages to build a pool, then keep only
+    the categories the user selected (params.categories; empty = all) within the
+    urgency window. Returns [] on failure (caller falls back to Selenium).
     """
     if not CURL_CFFI_AVAILABLE:
         log_agent_action("KworkHTTP", "curl_cffi unavailable — skipping HTTP path", level="WARNING")
         return []
     try:
-        # 1) page 1 to discover the last page number.
-        html1 = _fetch_html(_build_url(params, 1))
-        if not html1:
+        categories = set(getattr(params, "categories", ()) or ())
+
+        wl1 = _wl_from(1, params)
+        if not wl1:
+            log_agent_action("KworkHTTP", "stateData.wantsListData missing — layout changed?", level="WARNING")
             return []
-        data = _extract_state_data(html1)
-        wl = (data or {}).get("wantsListData")
-        if not wl:
-            log_agent_action(
-                "KworkHTTP",
-                "stateData.wantsListData missing — cookies invalid or layout changed",
-                level="WARNING",
-            )
-            return []
-        last_page = (wl.get("pagination") or {}).get("last_page") or 1
-        log_agent_action("KworkHTTP", f"🌐 [HTTP] page 1 ok — last_page={last_page}")
+        last_page = (wl1.get("pagination") or {}).get("last_page") or 1
+        log_agent_action("KworkHTTP", f"🌐 [HTTP] last_page={last_page}, scanning last {_PAGES_SCAN}")
 
-        # 2) fetch the last page (the expiring ones). On any failure here, return
-        # [] so the caller falls back to Selenium — never serve stale page-1 data.
-        if last_page > 1:
-            html_last = _fetch_html(_build_url(params, last_page))
-            if not html_last:
-                log_agent_action("KworkHTTP", "⚠️ [HTTP] last-page fetch failed — returning []", level="WARNING")
+        # Collect wants from the last N pages (most-expiring first).
+        collected: list[dict[str, Any]] = []
+        if last_page <= 1:
+            collected = wl1.get("wants") or []
+            scanned_pages = {1}
+        else:
+            scanned_pages = set()
+            start = max(2, last_page - _PAGES_SCAN + 1)
+            for p in range(last_page, start - 1, -1):
+                wlp = _wl_from(p, params)
+                if wlp:
+                    collected.extend(wlp.get("wants") or [])
+                    scanned_pages.add(p)
+            if not collected:
+                log_agent_action("KworkHTTP", "⚠️ [HTTP] no pages fetched — returning []", level="WARNING")
                 return []
-            wl_last = (_extract_state_data(html_last) or {}).get("wantsListData")
-            if not wl_last:
-                log_agent_action("KworkHTTP", "⚠️ [HTTP] last-page stateData missing — returning []", level="WARNING")
-                return []
-            wl = wl_last
 
-        wants = wl.get("wants") or []
-        projects = [m for m in (_map_want(w, last_page) for w in wants) if m]
+        projects = [m for m in (_map_want(w, 0) for w in collected) if m]
 
+        # Dedupe by url (pages can overlap as the feed shifts).
+        seen: set = set()
+        projects = [p for p in projects if not (p["url"] in seen or seen.add(p["url"]))]
+
+        if categories:
+            projects = [p for p in projects if p["category_id"] in categories]
         if max_urgency_hours and max_urgency_hours < 9999:
             projects = [p for p in projects if p["urgency_hours"] <= max_urgency_hours]
 
         log_agent_action(
             "KworkHTTP",
-            f"✅ [HTTP] Parsed {len(projects)} projects from last page (no Chrome)",
+            f"✅ [HTTP] {len(projects)} projects "
+            f"(pages={sorted(scanned_pages)}, categories={'all' if not categories else len(categories)})",
         )
         return projects
     except Exception as e:
         log_agent_action("KworkHTTP", f"❌ [HTTP] fetch_listing failed: {e}", level="ERROR")
         return []
-
-
-def auth_probe() -> dict[str, Any]:
-    """Diagnostic (conservative): ONE request through the rate limiter to find
-    the favourites feed. Tries POST /projects (XHR + JSON accept, no body) and
-    reports whether it returns the user's favouriteCategories + filtered wants.
-    Read-only.
-    """
-    if not CURL_CFFI_AVAILABLE:
-        return {"error": "curl_cffi unavailable"}
-
-    base = "https://kwork.ru/projects"
-    xhr = {
-        "x-requested-with": "XMLHttpRequest",
-        "accept": "application/json, text/plain, */*",
-        "origin": "https://kwork.ru",
-        "referer": f"{base}?a=1",
-    }
-    r = _request("POST", base, expect_json=True, extra_headers=xhr)  # single request
-
-    info: dict[str, Any] = {"userId_cookie": _cookies_dict().get("userId"),
-                            "request": "POST /projects (XHR, no body)"}
-    if r is None:
-        info["result"] = "no response (rate-limited, error, or anti-bot cooldown)"
-        return info
-    info["status"] = r.status_code
-    info["ctype"] = (r.headers.get("content-type") or "")[:40]
-    try:
-        j = r.json()
-    except Exception:
-        info["is_json"] = False
-        info["len"] = len(r.text or "")
-        info["head"] = (r.text or "")[:200]
-        return info
-    info["is_json"] = True
-    data = j.get("data", j) if isinstance(j, dict) else {}
-    fc = data.get("favouriteCategories")
-    info["fav_cat_count"] = len(fc) if isinstance(fc, (list, dict)) else fc
-    info["fav_cat_ids"] = sorted(fc.keys()) if isinstance(fc, dict) else None
-    info["wants_count"] = len(data.get("wants") or [])
-    info["total"] = (data.get("pagination") or {}).get("total")
-    info["sample"] = [{"id": w.get("id"), "title": w.get("name")} for w in (data.get("wants") or [])[:5]]
-    return info

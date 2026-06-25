@@ -735,3 +735,39 @@ a {
   .form-field-inline { width: 100%; }
   .history-result-item { flex-direction: column; gap: 2px; }
 }
+
+/* ── CATEGORY PICKER ── */
+.btn-sm { padding: 4px 8px; font-size: 11px; }
+.cat-picker {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.cat-picker-actions { margin-bottom: 8px; }
+.cat-group { margin-bottom: 10px; }
+.cat-group-title {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font-size: 12px;
+  padding: 2px 0;
+  cursor: pointer;
+}
+.cat-group-title:hover { color: var(--text); }
+.cat-subs { display: flex; flex-direction: column; gap: 3px; padding: 4px 0 0 14px; }
+.cat-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.cat-sub:hover { color: var(--text); }
+.cat-sub input { accent-color: var(--accent); }

@@ -6,6 +6,8 @@ class SearchParams:
     keywords_list: tuple[str, ...]
     max_urgency_hours: int
     budget_filters: tuple[int, ...] = ()
+    # Kwork category ids to keep (service-side filter, driven by the UI). Empty = all.
+    categories: tuple[str, ...] = ()
 
     @property
     def keyword(self) -> str:
