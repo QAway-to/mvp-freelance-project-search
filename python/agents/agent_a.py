@@ -435,7 +435,12 @@ class AgentA:
         log_agent_action("Agent A", f"📋 [SELENIUM] Mode: {'favorites' if favorites_mode else 'keyword'} | Target: Find up to 10 relevant projects")
 
         # Search parameters
-        max_pages = 3
+        # Scrape ONLY the last listing page. Kwork orders projects oldest-first, so the
+        # most-expiring (most urgent) jobs sit on the last page — exactly what we want to
+        # bid on early. Rendering a single page also keeps Chrome's RSS well under the
+        # 512MB free-tier ceiling (multi-page scrapes OOM-killed the instance mid-search).
+        # Strategy: run the search more frequently instead of scraping deeper per run.
+        max_pages = 1
         max_relevant_projects = 300  # effectively unlimited
         
         all_projects = []  # All projects found (with full details)
