@@ -1058,28 +1058,22 @@ class AgentA:
         return False
 
     def _fill_offer_title(self, title: str) -> bool:
-        """Fill the required «Название заказа» (offer title) field with the project
-        title. Tries by placeholder/label, then any empty text input near the top."""
+        """Fill the required «Название заказа» field — it's a textarea[name='name']
+        (NOT the site search input, NOT the description editor)."""
         title = (title or "").strip()
         if not title:
             return False
-        from selenium.webdriver.common.keys import Keys
-        cands = []
-        cands += self.driver.find_elements(By.CSS_SELECTOR,
-            "input[placeholder*='азвани'], input[placeholder*='аголов'], "
-            "[class*='title'] input, [class*='name'] input, [class*='offer'] input[type='text']")
-        # generic empty visible text inputs as a fallback
-        for inp in self.driver.find_elements(By.CSS_SELECTOR, "input[type='text'], input:not([type])"):
-            if inp not in cands:
-                cands.append(inp)
+        cands = self.driver.find_elements(
+            By.CSS_SELECTOR,
+            "textarea[name='name'], textarea[placeholder*='азвани'], input[placeholder*='азвани']",
+        )
         for inp in cands:
             try:
                 if not inp.is_displayed():
                     continue
-                if inp.get_attribute("id") == "offer-custom-price" or (inp.get_attribute("value") or "").strip():
-                    continue  # skip price and already-filled fields
                 self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp)
                 inp.click()
+                inp.clear()
                 inp.send_keys(title[:100])
                 self.driver.execute_script(
                     "var el=arguments[0];['input','change','blur'].forEach(function(t){el.dispatchEvent(new Event(t,{bubbles:true}));});",
