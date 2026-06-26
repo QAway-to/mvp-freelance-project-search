@@ -1057,6 +1057,35 @@ class AgentA:
                 continue
         return False
 
+    def _select_payment_order(self) -> bool:
+        """Select the required 'порядок оплаты' — default «Целиком» (pay in full).
+        The new_offer form blocks submit until one option is chosen."""
+        # Target short option labels equal to «Целиком» (avoid the long error sentence).
+        xp = ("//label[normalize-space(translate(.,'ЦЕЛИКОМ','целиком'))='целиком']"
+              " | //*[normalize-space(translate(text(),'ЦЕЛИКОМ','целиком'))='целиком']")
+        for el in self.driver.find_elements(By.XPATH, xp):
+            try:
+                if not el.is_displayed():
+                    continue
+                self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+                self.driver.execute_script("arguments[0].click();", el)
+                self.human_delay(0.3, 0.6)
+                log_agent_action("Agent A", "📨 [RESPOND] payment order → «Целиком»")
+                return True
+            except Exception:
+                continue
+        # Fallback: first radio in the payment block.
+        try:
+            radios = [r for r in self.driver.find_elements(By.CSS_SELECTOR, "input[type=radio]") if r.is_displayed()]
+            if radios:
+                self.driver.execute_script("arguments[0].click();", radios[0])
+                self.human_delay(0.3, 0.6)
+                log_agent_action("Agent A", "📨 [RESPOND] payment order → first radio (fallback)")
+                return True
+        except Exception:
+            pass
+        return False
+
     def submit_response(self, url: str, cp_text: str, duration: str = None) -> bool:
         """Submit a response (отклик) on the Kwork new_offer form via Selenium.
 
@@ -1205,6 +1234,10 @@ class AgentA:
             if not self._select_duration(duration):
                 log_agent_action("Agent A", f"⚠️ [RESPOND] could not select duration {duration!r}", level="WARNING")
 
+            # ── 3b. порядок оплаты (required: целиком / по частям) ──
+            if not self._select_payment_order():
+                log_agent_action("Agent A", "⚠️ [RESPOND] could not select payment order", level="WARNING")
+
             # ── 4. submit ──
             submit_btn = next((b for b in self.driver.find_elements(By.CSS_SELECTOR, "button.kw-button--green")
                                if "предлож" in (b.text or "").lower()), None)
@@ -1257,6 +1290,24 @@ class AgentA:
             except Exception:
                 pass
             trace(f"STILL ON FORM — price_val={price_val!r} duration={duration!r} visible_errors={errs}")
+            # If a payment-order error remains, dump that area's HTML so the selector
+            # can be fixed precisely.
+            if any("оплат" in (e or "").lower() for e in errs):
+                try:
+                    dump = self.driver.execute_script(
+                        """
+                        var hits=[];
+                        document.querySelectorAll('label,button,span,div').forEach(function(el){
+                          var t=(el.innerText||'').trim().toLowerCase();
+                          if((t==='целиком'||t==='по частям'||t.indexOf('оплат')>-1) && t.length<40 && el.offsetParent!==null)
+                            hits.push(el.outerHTML.slice(0,160));
+                        });
+                        return hits.slice(0,8);
+                        """
+                    )
+                    trace(f"payment-area html: {dump}")
+                except Exception:
+                    pass
             log_agent_action("Agent A", f"⚠️ [RESPOND] still on form — errors={errs} price={price_val!r}", level="WARNING")
             return False
 
