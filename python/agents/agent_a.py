@@ -1058,33 +1058,27 @@ class AgentA:
         return False
 
     def _select_payment_order(self) -> bool:
-        """Select the required 'порядок оплаты' — default «Целиком» (pay in full).
-        The new_offer form blocks submit until one option is chosen."""
-        # Target short option labels equal to «Целиком» (avoid the long error sentence).
-        xp = ("//label[normalize-space(translate(.,'ЦЕЛИКОМ','целиком'))='целиком']"
-              " | //*[normalize-space(translate(text(),'ЦЕЛИКОМ','целиком'))='целиком']")
-        for el in self.driver.find_elements(By.XPATH, xp):
-            try:
-                if not el.is_displayed():
-                    continue
-                self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
-                self.driver.execute_script("arguments[0].click();", el)
-                self.human_delay(0.3, 0.6)
-                log_agent_action("Agent A", "📨 [RESPOND] payment order → «Целиком»")
-                return True
-            except Exception:
-                continue
-        # Fallback: first radio in the payment block.
+        """Select the required 'порядок оплаты' — «Целиком» (pay in full). The
+        options are div.offer-payment-type__item (Vue, not radios); the first is
+        visually `active` by default but Vue only registers it once it's clicked."""
+        items = self.driver.find_elements(By.CSS_SELECTOR, ".offer-payment-type__item")
+        if not items:
+            return False
+        # Prefer the «Целиком…» item; else the first one.
+        target = next((it for it in items if "целиком" in (it.text or "").lower()), items[0])
         try:
-            radios = [r for r in self.driver.find_elements(By.CSS_SELECTOR, "input[type=radio]") if r.is_displayed()]
-            if radios:
-                self.driver.execute_script("arguments[0].click();", radios[0])
-                self.human_delay(0.3, 0.6)
-                log_agent_action("Agent A", "📨 [RESPOND] payment order → first radio (fallback)")
-                return True
-        except Exception:
-            pass
-        return False
+            self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", target)
+            self.human_delay(0.2, 0.4)
+            try:
+                target.click()  # native click — fires the Vue @click handler
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", target)
+            self.human_delay(0.3, 0.6)
+            log_agent_action("Agent A", "📨 [RESPOND] payment order → «Целиком»")
+            return True
+        except Exception as e:
+            log_agent_action("Agent A", f"⚠️ [RESPOND] payment-order click failed: {e}", level="WARNING")
+            return False
 
     def submit_response(self, url: str, cp_text: str, duration: str = None) -> bool:
         """Submit a response (отклик) on the Kwork new_offer form via Selenium.
