@@ -1066,8 +1066,9 @@ class AgentA:
           - срок     → vue-select option matching `duration` (default "3 дня")
         This POSTS a real offer — the UI gates it behind an explicit confirm."""
         from selenium.webdriver.common.keys import Keys
-        from browser import quit_driver, kill_all_chrome
+        from browser import quit_driver, kill_all_chrome, mem_snapshot
 
+        log_agent_action("Agent A", f"📊 [RESPOND] mem at entry: {mem_snapshot()}")
         duration = (duration or "3 дня").strip()
 
         m = re.search(r"/projects/(\d+)", url) or re.search(r"project=(\d+)", url)
@@ -1083,16 +1084,20 @@ class AgentA:
         kill_all_chrome()
         self.driver = None
         self.logged_in = False
+        log_agent_action("Agent A", f"📊 [RESPOND] mem after cleanup: {mem_snapshot()}")
         if not self.driver:
             self.setup_driver()
+        log_agent_action("Agent A", f"📊 [RESPOND] mem after Chrome start: {mem_snapshot()}")
         if not self.logged_in and not self.login():
             log_agent_action("Agent A", "❌ [RESPOND] Login failed before opening form — aborting", level="ERROR")
             return False
+        log_agent_action("Agent A", f"📊 [RESPOND] mem after login: {mem_snapshot()}")
 
         log_agent_action("Agent A", f"📨 [RESPOND] Opening offer form {offer_url} (duration={duration!r})")
 
         def _open_form() -> bool:
             self.driver.get(offer_url)
+            log_agent_action("Agent A", f"📊 [RESPOND] mem after page nav ({self.driver.current_url[:60]}): {mem_snapshot()}")
             self.human_delay(1, 2)
             if "new_offer" not in self.driver.current_url:
                 return False
@@ -1100,8 +1105,10 @@ class AgentA:
                 WebDriverWait(self.driver, 15).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, "div.trumbowyg-editor"))
                 )
+                log_agent_action("Agent A", f"📊 [RESPOND] mem after form rendered: {mem_snapshot()}")
                 return True
             except TimeoutException:
+                log_agent_action("Agent A", f"⚠️ [RESPOND] editor not found in 15s; mem: {mem_snapshot()}", level="WARNING")
                 return False
 
         try:

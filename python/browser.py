@@ -26,9 +26,7 @@ def _build_options() -> uc.ChromeOptions:
     options.add_argument("--disable-software-rasterizer")
     options.add_argument("--disable-background-timer-throttling")
     options.add_argument("--disk-cache-size=0")                   # no on-disk/in-mem cache growth
-    options.add_argument("--js-flags=--max-old-space-size=128")   # cap V8 heap (tight for 512MB)
-    options.add_argument("--disable-features=site-per-process,IsolateOrigins,TranslateUI")
-    options.add_argument("--disable-back-forward-cache")
+    options.add_argument("--js-flags=--max-old-space-size=256")   # cap V8 heap
     options.page_load_strategy = "eager"
     return options
 
@@ -142,6 +140,26 @@ def quit_driver():
         reap_driver(_driver)
         _driver = None
         log_agent_action("Browser", "🛑 Chrome stopped")
+
+
+def mem_snapshot() -> str:
+    """One-line memory snapshot: our Python RSS, total Chrome RSS, system used/avail."""
+    try:
+        import psutil
+        py = psutil.Process().memory_info().rss // (1024 * 1024)
+        vm = psutil.virtual_memory()
+        chrome = 0
+        for proc in psutil.process_iter(attrs=["name", "memory_info"]):
+            try:
+                if "chrome" in (proc.info.get("name") or "").lower():
+                    mi = proc.info.get("memory_info")
+                    if mi:
+                        chrome += mi.rss
+            except Exception:
+                pass
+        return f"py={py}MB chrome={chrome // (1024 * 1024)}MB sys_used={vm.percent}% avail={vm.available // (1024 * 1024)}MB"
+    except Exception as e:
+        return f"mem? {e}"
 
 
 def kill_all_chrome() -> None:
