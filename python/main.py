@@ -213,6 +213,36 @@ async def debug_info():
     }
 
 
+@app.get("/debug/offer-page")
+async def debug_offer_page(project: str):
+    """Read-only (no Chrome): fetch the new_offer page over authenticated HTTP and
+    surface the submit endpoint / CSRF / field names so the offer POST can be
+    replicated without Selenium."""
+    import re as _re
+    from agents.kwork_http import _request, _extract_state_data
+
+    url = f"https://kwork.ru/new_offer?project={project}"
+    r = await asyncio.to_thread(lambda: _request("GET", url, use_cookies=True))
+    if r is None:
+        return {"error": "no response (rate-limited / challenge / cookies)"}
+    html = r.text or ""
+    sd = _extract_state_data(html) or {}
+    offer_eps = sorted(set(_re.findall(r"""["'](/[A-Za-z0-9_\-/]*(?:offer|want)[A-Za-z0-9_\-/]*)["']""", html, _re.I)))
+    return {
+        "status": r.status_code,
+        "len": len(html),
+        "looks_like_form": ("trumbowyg" in html) or ("offer-custom-price" in html),
+        "title": (_re.search(r"<title[^>]*>(.*?)</title>", html, _re.S) or [None, None])[1],
+        "stateData_top_keys": sorted(sd.keys())[:50] if sd else None,
+        "csrf_token_cookie_present": "csrf_user_token" in (html and "" or "") or None,
+        "csrf_in_html": _re.findall(r"""csrf[^"']{0,25}["']([A-Za-z0-9_\-]{16,})""", html)[:3],
+        "form_actions": _re.findall(r'action="([^"]+)"', html)[:10],
+        "offer_endpoints_in_html": offer_eps[:25],
+        "has_trumbowyg": "trumbowyg" in html,
+        "has_price_input": "offer-custom-price" in html,
+    }
+
+
 @app.get("/debug/offer-form")
 async def debug_offer_form(project: str):
     """TEMP DIAGNOSTIC — dump срок dropdown options + key selectors from the new_offer
