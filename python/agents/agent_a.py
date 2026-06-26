@@ -1296,16 +1296,11 @@ class AgentA:
                 try:
                     dump = self.driver.execute_script(
                         """
-                        var hits=[];
-                        document.querySelectorAll('label,button,span,div').forEach(function(el){
-                          var t=(el.innerText||'').trim().toLowerCase();
-                          if((t==='целиком'||t==='по частям'||t.indexOf('оплат')>-1) && t.length<40 && el.offsetParent!==null)
-                            hits.push(el.outerHTML.slice(0,160));
-                        });
-                        return hits.slice(0,8);
+                        var c = document.querySelector('.offer-payment-type, [class*=payment]');
+                        return c ? c.outerHTML.replace(/\\s+/g,' ').slice(0, 1200) : 'no .offer-payment-type';
                         """
                     )
-                    trace(f"payment-area html: {dump}")
+                    trace(f"payment-block html: {dump}")
                 except Exception:
                     pass
             log_agent_action("Agent A", f"⚠️ [RESPOND] still on form — errors={errs} price={price_val!r}", level="WARNING")
