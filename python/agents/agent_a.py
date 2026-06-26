@@ -1066,7 +1066,7 @@ class AgentA:
           - срок     → vue-select option matching `duration` (default "3 дня")
         This POSTS a real offer — the UI gates it behind an explicit confirm."""
         from selenium.webdriver.common.keys import Keys
-        from browser import quit_driver
+        from browser import quit_driver, kill_all_chrome
 
         duration = (duration or "3 дня").strip()
 
@@ -1076,6 +1076,13 @@ class AgentA:
             return False
         offer_url = f"https://kwork.ru/new_offer?project={m.group(1)}"
 
+        # Free all memory before rendering the heavy new_offer form. КП generation
+        # may have just run an attachment-download Chrome; any orphan starves this
+        # one on 512MB and makes it thrash/hang. Start from a single clean Chrome.
+        quit_driver()
+        kill_all_chrome()
+        self.driver = None
+        self.logged_in = False
         if not self.driver:
             self.setup_driver()
         if not self.logged_in and not self.login():

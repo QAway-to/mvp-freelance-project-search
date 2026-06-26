@@ -140,3 +140,24 @@ def quit_driver():
         reap_driver(_driver)
         _driver = None
         log_agent_action("Browser", "🛑 Chrome stopped")
+
+
+def kill_all_chrome() -> None:
+    """Kill every chrome/chromedriver process to free memory before a fresh
+    Selenium task. On the 512MB tier, orphans left by a prior driver (e.g. the
+    attachment-download Chrome) starve the next one and make it thrash/hang."""
+    try:
+        import psutil
+    except Exception:
+        return
+    killed = 0
+    for p in psutil.process_iter(attrs=["name"]):
+        try:
+            n = (p.info.get("name") or "").lower()
+            if "chrome" in n or "chromedriver" in n:
+                p.kill()
+                killed += 1
+        except Exception:
+            pass
+    if killed:
+        log_agent_action("Browser", f"🧹 Killed {killed} stray chrome process(es) to free memory")
