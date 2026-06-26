@@ -403,7 +403,8 @@ async def api_parse(request: Request):
     if not url:
         raise HTTPException(status_code=400, detail="url required")
 
-    project = await asyncio.to_thread(agent_a.parse_single_url, url)
+    from agents.kwork_http import fetch_project
+    project = await asyncio.to_thread(fetch_project, url)
 
     if project is None:
         return JSONResponse({"success": False, "data": None, "error": "PARSE_FAILED"}, status_code=422)

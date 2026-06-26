@@ -2,7 +2,8 @@ const { requireAuth } = require('../../../lib/auth')
 const { parseProject } = require('../../../lib/pythonClient')
 const { normalizeProject } = require('../../../lib/normalizers')
 
-const KWORK_URL_PATTERN = /^https:\/\/kwork\.ru\/projects\/(\d+)\/view$/
+// project view URL, new_offer URL, or a bare project id (backend extracts the id)
+const KWORK_URL_PATTERN = /(?:kwork\.ru\/projects\/\d+|kwork\.ru\/new_offer\?project=\d+|^\s*\d+\s*$)/
 
 export default async function handler(req, res) {
   if (requireAuth(req, res)) return
@@ -20,7 +21,7 @@ export default async function handler(req, res) {
   if (!KWORK_URL_PATTERN.test(url.trim())) {
     return res.status(400).json({
       status: 'error',
-      message: 'Invalid Kwork URL format. Expected: https://kwork.ru/projects/XXXXX/view',
+      message: 'Expected kwork.ru/projects/ID, kwork.ru/new_offer?project=ID, or a project ID',
     })
   }
 

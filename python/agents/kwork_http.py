@@ -368,3 +368,35 @@ def fetch_listing(params: Any, max_urgency_hours: float = 9999) -> list[dict[str
     except Exception as e:
         log_agent_action("KworkHTTP", f"❌ [HTTP] fetch_listing failed: {e}", level="ERROR")
         return []
+
+
+def fetch_project(url_or_id: str) -> Optional[dict[str, Any]]:
+    """Parse a single Kwork project over public HTTP (no Chrome). Accepts a
+    /projects/<id>/view URL, a new_offer?project=<id> URL, or a bare id. Returns
+    the project dict (same schema as the listing) or None."""
+    if not CURL_CFFI_AVAILABLE:
+        return None
+    s = (url_or_id or "").strip()
+    m = (re.search(r"/projects/(\d+)", s) or re.search(r"project=(\d+)", s)
+         or re.fullmatch(r"\s*(\d+)\s*", s))
+    if not m:
+        log_agent_action("KworkHTTP", f"⚠️ [HTTP] no project id in {s!r}", level="WARNING")
+        return None
+    pid = m.group(1)
+    try:
+        html = _fetch_html(f"{config.KWORK_BASE_URL}/projects/{pid}/view", use_cookies=False)
+        if not html:
+            return None
+        want = (_extract_state_data(html) or {}).get("wantData")
+        if not want:
+            log_agent_action("KworkHTTP", "⚠️ [HTTP] wantData missing (project closed/removed?)", level="WARNING")
+            return None
+        project = _map_want(want, 0)
+        if not project:
+            return None
+        project.setdefault("evaluation", {"score": 1.0, "reasons": [], "suitable": True})
+        log_agent_action("KworkHTTP", f"✅ [HTTP] parsed project {pid}: {project.get('title','')[:50]}")
+        return project
+    except Exception as e:
+        log_agent_action("KworkHTTP", f"❌ [HTTP] fetch_project failed: {e}", level="ERROR")
+        return None

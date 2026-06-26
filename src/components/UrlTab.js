@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
-const KWORK_PATTERN = /^https:\/\/kwork\.ru\/projects\/\d+\/view$/
+// Accept a project view URL, a new_offer URL, or a bare project id.
+const KWORK_PATTERN = /(?:kwork\.ru\/projects\/\d+|kwork\.ru\/new_offer\?project=\d+|^\s*\d+\s*$)/
 
 export default function UrlTab({ onParseUrl, isLoading }) {
   const [url, setUrl] = useState('')
@@ -8,9 +9,9 @@ export default function UrlTab({ onParseUrl, isLoading }) {
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!url.trim()) { setError('введите url проекта'); return }
+    if (!url.trim()) { setError('введите url проекта или id'); return }
     if (!KWORK_PATTERN.test(url.trim())) {
-      setError('формат: https://kwork.ru/projects/XXXXX/view')
+      setError('формат: kwork.ru/projects/ID/view, kwork.ru/new_offer?project=ID или просто ID')
       return
     }
     setError(null)
@@ -21,13 +22,13 @@ export default function UrlTab({ onParseUrl, isLoading }) {
     <form onSubmit={handleSubmit}>
       <div className="form-group">
         <label className="form-label">
-          kwork url <span className="form-hint">// /projects/ID/view</span>
+          kwork url <span className="form-hint">// /projects/ID или new_offer?project=ID</span>
         </label>
         <input
-          type="url"
+          type="text"
           value={url}
           onChange={(e) => { setUrl(e.target.value); setError(null) }}
-          placeholder="https://kwork.ru/projects/2996436/view"
+          placeholder="https://kwork.ru/new_offer?project=3205110"
           className="form-input"
           disabled={isLoading}
           autoComplete="off"
