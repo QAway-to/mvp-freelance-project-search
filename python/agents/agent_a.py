@@ -1057,6 +1057,41 @@ class AgentA:
                 continue
         return False
 
+    def _fill_offer_title(self, title: str) -> bool:
+        """Fill the required «Название заказа» (offer title) field with the project
+        title. Tries by placeholder/label, then any empty text input near the top."""
+        title = (title or "").strip()
+        if not title:
+            return False
+        from selenium.webdriver.common.keys import Keys
+        cands = []
+        cands += self.driver.find_elements(By.CSS_SELECTOR,
+            "input[placeholder*='азвани'], input[placeholder*='аголов'], "
+            "[class*='title'] input, [class*='name'] input, [class*='offer'] input[type='text']")
+        # generic empty visible text inputs as a fallback
+        for inp in self.driver.find_elements(By.CSS_SELECTOR, "input[type='text'], input:not([type])"):
+            if inp not in cands:
+                cands.append(inp)
+        for inp in cands:
+            try:
+                if not inp.is_displayed():
+                    continue
+                if inp.get_attribute("id") == "offer-custom-price" or (inp.get_attribute("value") or "").strip():
+                    continue  # skip price and already-filled fields
+                self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp)
+                inp.click()
+                inp.send_keys(title[:100])
+                self.driver.execute_script(
+                    "var el=arguments[0];['input','change','blur'].forEach(function(t){el.dispatchEvent(new Event(t,{bubbles:true}));});",
+                    inp,
+                )
+                self.human_delay(0.2, 0.4)
+                log_agent_action("Agent A", f"📨 [RESPOND] offer title → {title[:50]!r}")
+                return True
+            except Exception:
+                continue
+        return False
+
     def _select_payment_order(self) -> bool:
         """Select the required 'порядок оплаты' — «Целиком» (pay in full). The
         options are div.offer-payment-type__item (Vue, not radios); the first is
@@ -1080,7 +1115,7 @@ class AgentA:
             log_agent_action("Agent A", f"⚠️ [RESPOND] payment-order click failed: {e}", level="WARNING")
             return False
 
-    def submit_response(self, url: str, cp_text: str, duration: str = None) -> bool:
+    def submit_response(self, url: str, cp_text: str, duration: str = None, title: str = None) -> bool:
         """Submit a response (отклик) on the Kwork new_offer form via Selenium.
 
         Fills the confirmed form fields and clicks «Предложить»:
@@ -1197,6 +1232,10 @@ class AgentA:
             entered = self.driver.execute_script("return (arguments[0].innerText||'').trim().length;", editor)
             trace(f"КП entered: {entered} chars (cp len {len(clean_cp)})")
 
+            # ── 1b. offer title «Название заказа» (required) ──
+            if not self._fill_offer_title(title):
+                log_agent_action("Agent A", f"⚠️ [RESPOND] could not fill offer title {title!r}", level="WARNING")
+
             # ── 2. price = 75% of the upper bound of the allowed range ──
             price_inputs = self.driver.find_elements(By.CSS_SELECTOR, "input#offer-custom-price")
             if price_inputs:
@@ -1286,17 +1325,20 @@ class AgentA:
             trace(f"STILL ON FORM — price_val={price_val!r} duration={duration!r} visible_errors={errs}")
             # If a payment-order error remains, dump that area's HTML so the selector
             # can be fixed precisely.
-            if any("оплат" in (e or "").lower() for e in errs):
-                try:
-                    dump = self.driver.execute_script(
-                        """
-                        var c = document.querySelector('.offer-payment-type, [class*=payment]');
-                        return c ? c.outerHTML.replace(/\\s+/g,' ').slice(0, 1200) : 'no .offer-payment-type';
-                        """
-                    )
-                    trace(f"payment-block html: {dump}")
-                except Exception:
-                    pass
+            try:
+                inps = self.driver.execute_script(
+                    """
+                    var out=[];
+                    document.querySelectorAll("input[type='text'],input:not([type]),textarea").forEach(function(el){
+                      if(el.offsetParent!==null)
+                        out.push((el.outerHTML||'').replace(/\\s+/g,' ').slice(0,150));
+                    });
+                    return out.slice(0,12);
+                    """
+                )
+                trace(f"visible text inputs: {inps}")
+            except Exception:
+                pass
             log_agent_action("Agent A", f"⚠️ [RESPOND] still on form — errors={errs} price={price_val!r}", level="WARNING")
             return False
 

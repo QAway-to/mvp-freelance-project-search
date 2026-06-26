@@ -384,10 +384,11 @@ async def api_respond(request: Request):
     url = (data.get("url") or "").strip()
     cp_text = (data.get("cp_text") or "").strip()
     duration = (data.get("duration") or "").strip() or None
+    title = (data.get("title") or "").strip() or None
     if not url or not cp_text:
         raise HTTPException(status_code=400, detail="url and cp_text required")
 
-    success = await asyncio.to_thread(agent_a.submit_response, url, cp_text, duration)
+    success = await asyncio.to_thread(agent_a.submit_response, url, cp_text, duration, title)
     if success:
         return {"success": True, "message": "Отклик отправлен"}
     return JSONResponse({"success": False, "message": "Не удалось отправить отклик"}, status_code=422)

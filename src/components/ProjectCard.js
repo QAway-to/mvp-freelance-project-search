@@ -75,7 +75,7 @@ export default function ProjectCard({ project, platform = 'kwork', authHeaders =
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...authHeaders },
-          body: JSON.stringify({ url: project.url, cp_text: cpText, duration: srok }),
+          body: JSON.stringify({ url: project.url, cp_text: cpText, duration: srok, title: project.title }),
         })
         const data = await res.json()
         setRespondState(data.success ? 'done' : 'error')
