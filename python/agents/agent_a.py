@@ -5,7 +5,7 @@ import re
 import os
 from collections import deque
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import aiohttp
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -1114,7 +1114,33 @@ class AgentA:
             log_agent_action("Agent A", f"⚠️ [RESPOND] payment-order click failed: {e}", level="WARNING")
             return False
 
-    def submit_response(self, url: str, cp_text: str, duration: str = None, title: str = None) -> bool:
+    def _unit_total_price(self, description: str) -> Optional[int]:
+        """For lead-gen/outreach tasks priced per unit, return quantity × unit price.
+        Conservative: only returns a value when BOTH a per-unit price and a quantity
+        are clearly stated, else None (caller falls back to the budget-based price)."""
+        if not description:
+            return None
+        d = description.lower().replace("\xa0", " ")
+        units = r"(?:лид\w*|контакт\w*|клиент\w*|подписчик\w*|анкет\w*|номер\w*|сообщени\w*|штук\w*|единиц\w*|шт\b)"
+        # unit price: "200 руб за лид", "по 150 ₽ за контакт", "100 р/лид"
+        pm = re.search(r"(\d[\d\s]{0,7}\d|\d)\s*(?:руб\w*|₽|р\.|р\b)\s*(?:за|/)\s*" + units, d)
+        if not pm:
+            return None
+        # quantity: "нужно 50 лидов", "200 контактов"
+        qm = re.search(r"(\d[\d\s]{0,7}\d|\d)\s*" + units, d)
+        if not qm:
+            return None
+        try:
+            unit = int(re.sub(r"\D", "", pm.group(1)))
+            qty = int(re.sub(r"\D", "", qm.group(1)))
+        except (TypeError, ValueError):
+            return None
+        if unit <= 0 or qty <= 0:
+            return None
+        return unit * qty
+
+    def submit_response(self, url: str, cp_text: str, duration: str = None,
+                        title: str = None, description: str = None) -> bool:
         """Submit a response (отклик) on the Kwork new_offer form via Selenium.
 
         Fills the confirmed form fields and clicks «Предложить»:
@@ -1235,7 +1261,7 @@ class AgentA:
             if not self._fill_offer_title(title):
                 log_agent_action("Agent A", f"⚠️ [RESPOND] could not fill offer title {title!r}", level="WARNING")
 
-            # ── 2. price = 75% of the upper bound of the allowed range ──
+            # ── 2. price: quantity×unit for per-unit lead/outreach tasks, else 75% of max ──
             price_inputs = self.driver.find_elements(By.CSS_SELECTOR, "input#offer-custom-price")
             if price_inputs:
                 placeholder = price_inputs[0].get_attribute("placeholder") or ""
@@ -1243,7 +1269,14 @@ class AgentA:
                 nums = [n for n in nums if n > 0]
                 if nums:
                     max_price = max(nums)  # upper bound of the allowed range
-                    price = int(round(max_price * 0.75))
+                    unit_total = self._unit_total_price(description)
+                    if unit_total:
+                        # per-unit pricing wins; clamp to the form's max so it isn't rejected
+                        price = min(unit_total, max_price)
+                        why = f"qty×unit={unit_total}" + (f" clamped to max {max_price}" if unit_total > max_price else "")
+                    else:
+                        price = int(round(max_price * 0.75))
+                        why = f"75% of max {max_price}"
                     pi = price_inputs[0]
                     self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", pi)
                     pi.click()
@@ -1256,7 +1289,8 @@ class AgentA:
                         pi,
                     )
                     self.human_delay(0.4, 0.8)
-                    log_agent_action("Agent A", f"📨 [RESPOND] price={price} (75% of max {max_price})")
+                    log_agent_action("Agent A", f"📨 [RESPOND] price={price} ({why})")
+                    trace(f"price={price} ({why})")
                 else:
                     log_agent_action("Agent A", f"⚠️ [RESPOND] cannot parse price range from {placeholder!r}", level="WARNING")
             else:
