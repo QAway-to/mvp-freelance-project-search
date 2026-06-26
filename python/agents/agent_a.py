@@ -1189,8 +1189,9 @@ class AgentA:
                     pi.clear()
                     pi.send_keys(str(price))
                     # Fire input/change so Vue's v-model picks up the price.
+                    # (capture el first — `arguments` is shadowed inside the forEach callback)
                     self.driver.execute_script(
-                        "['input','change','blur'].forEach(function(t){arguments[0].dispatchEvent(new Event(t,{bubbles:true}));});",
+                        "var el=arguments[0];['input','change','blur'].forEach(function(t){el.dispatchEvent(new Event(t,{bubbles:true}));});",
                         pi,
                     )
                     self.human_delay(0.4, 0.8)
