@@ -1256,6 +1256,24 @@ class AgentA:
             self.human_delay(0.3, 0.6)
             entered = self.driver.execute_script("return (arguments[0].innerText||'').trim().length;", editor)
             trace(f"КП entered: {entered} chars (cp len {len(clean_cp)})")
+            # Measure the КП field's width in characters (to set the prompt's line length).
+            try:
+                meas = self.driver.execute_script(
+                    """
+                    var ed=arguments[0], cs=getComputedStyle(ed);
+                    var w=ed.clientWidth-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);
+                    var s=document.createElement('span');
+                    s.style.font=cs.font; s.style.position='absolute'; s.style.visibility='hidden'; s.style.whiteSpace='nowrap';
+                    s.textContent='абвгдеёжзийклмнопрстуфхabcdefghij 0123456789 .,';
+                    document.body.appendChild(s);
+                    var per=s.offsetWidth/s.textContent.length; document.body.removeChild(s);
+                    return {w:Math.round(w), font:cs.fontSize+' '+cs.fontFamily, per:per.toFixed(2), cpl:Math.floor(w/per)};
+                    """,
+                    editor,
+                )
+                trace(f"FIELD MEASURE: width={meas.get('w')}px chars_per_line={meas.get('cpl')} font={meas.get('font')}")
+            except Exception as e:
+                trace(f"field measure failed: {e}")
 
             # ── 1b. offer title «Название заказа» (required) ──
             if not self._fill_offer_title(title):
@@ -1277,6 +1295,9 @@ class AgentA:
                     else:
                         price = int(round(max_price * 0.75))
                         why = f"75% of max {max_price}"
+                    # charm pricing: shave 1 ₽ so it's 74999 not 75000 (never below 1)
+                    price = max(1, price - 1)
+                    why += " -1₽"
                     pi = price_inputs[0]
                     self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", pi)
                     pi.click()
