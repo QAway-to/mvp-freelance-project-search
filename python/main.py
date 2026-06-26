@@ -213,6 +213,13 @@ async def debug_info():
     }
 
 
+@app.get("/debug/offer-trace")
+async def debug_offer_trace():
+    """Read the crash-survivable offer-submit trace (survives OOM restarts)."""
+    from utils.trace import read_trace
+    return {"trace": read_trace(120)}
+
+
 @app.get("/debug/offer-page")
 async def debug_offer_page(project: str):
     """Read-only (no Chrome): fetch the new_offer page over authenticated HTTP and

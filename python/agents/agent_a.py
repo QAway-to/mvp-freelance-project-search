@@ -1066,8 +1066,11 @@ class AgentA:
           - срок     → vue-select option matching `duration` (default "3 дня")
         This POSTS a real offer — the UI gates it behind an explicit confirm."""
         from selenium.webdriver.common.keys import Keys
-        from browser import quit_driver, kill_all_chrome
+        from browser import quit_driver, kill_all_chrome, mem_snapshot
+        from utils.trace import trace, reset_trace
 
+        reset_trace("RESPOND submit")
+        trace(f"entry mem: {mem_snapshot()}")
         duration = (duration or "3 дня").strip()
 
         m = re.search(r"/projects/(\d+)", url) or re.search(r"project=(\d+)", url)
@@ -1083,25 +1086,32 @@ class AgentA:
         kill_all_chrome()
         self.driver = None
         self.logged_in = False
+        trace(f"after cleanup mem: {mem_snapshot()}")
         if not self.driver:
             self.setup_driver()
+        trace(f"after Chrome start mem: {mem_snapshot()}")
         if not self.logged_in and not self.login():
             log_agent_action("Agent A", "❌ [RESPOND] Login failed before opening form — aborting", level="ERROR")
             return False
+        trace(f"after login mem: {mem_snapshot()}")
 
         log_agent_action("Agent A", f"📨 [RESPOND] Opening offer form {offer_url} (duration={duration!r})")
 
         def _open_form() -> bool:
             self.driver.get(offer_url)
+            trace(f"after nav to {self.driver.current_url[:50]} mem: {mem_snapshot()}")
             self.human_delay(1, 2)
             if "new_offer" not in self.driver.current_url:
+                trace("redirected away from new_offer (not on form)")
                 return False
             try:
                 WebDriverWait(self.driver, 15).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, "div.trumbowyg-editor"))
                 )
+                trace(f"form rendered mem: {mem_snapshot()}")
                 return True
             except TimeoutException:
+                trace(f"editor not found in 15s mem: {mem_snapshot()}")
                 return False
 
         try:
