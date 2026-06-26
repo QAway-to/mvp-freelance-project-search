@@ -1143,12 +1143,36 @@ class AgentA:
                 return False
             self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", editor)
             editor.click()
-            self.human_delay(0.4, 0.8)
-            editor.send_keys(Keys.CONTROL + "a")
-            editor.send_keys(Keys.DELETE)
-            self.human_delay(0.2, 0.4)
-            editor.send_keys(cp_text.replace("\r\n", "\n").replace("\r", "\n"))
-            self.human_delay(0.6, 1.2)
+            self.human_delay(0.3, 0.6)
+            # Inject the КП via JS (instant — char-by-char send_keys took ~2 min for a
+            # 2000+ char proposal) and fire input/keyup so trumbowyg syncs its hidden
+            # textarea and Vue's v-model registers the value (the form was rejecting an
+            # "empty" model on submit).
+            clean_cp = cp_text.replace("\r\n", "\n").replace("\r", "\n")
+            self.driver.execute_script(
+                """
+                var ed = arguments[0], txt = arguments[1];
+                ed.innerHTML = '';
+                var lines = txt.split('\\n');
+                for (var i = 0; i < lines.length; i++) {
+                    if (i > 0) ed.appendChild(document.createElement('br'));
+                    ed.appendChild(document.createTextNode(lines[i]));
+                }
+                ['input','keyup','change','blur'].forEach(function(t){
+                    ed.dispatchEvent(new Event(t, {bubbles: true}));
+                });
+                """,
+                editor, clean_cp,
+            )
+            # Nudge trumbowyg's own keyup-sync with a real keystroke (add+remove a space).
+            try:
+                editor.send_keys(" ")
+                editor.send_keys(Keys.BACKSPACE)
+            except Exception:
+                pass
+            self.human_delay(0.3, 0.6)
+            entered = self.driver.execute_script("return (arguments[0].innerText||'').trim().length;", editor)
+            trace(f"КП entered: {entered} chars (cp len {len(clean_cp)})")
 
             # ── 2. price = 75% of the upper bound of the allowed range ──
             price_inputs = self.driver.find_elements(By.CSS_SELECTOR, "input#offer-custom-price")
@@ -1164,6 +1188,11 @@ class AgentA:
                     pi.click()
                     pi.clear()
                     pi.send_keys(str(price))
+                    # Fire input/change so Vue's v-model picks up the price.
+                    self.driver.execute_script(
+                        "['input','change','blur'].forEach(function(t){arguments[0].dispatchEvent(new Event(t,{bubbles:true}));});",
+                        pi,
+                    )
                     self.human_delay(0.4, 0.8)
                     log_agent_action("Agent A", f"📨 [RESPOND] price={price} (75% of max {max_price})")
                 else:
@@ -1200,8 +1229,34 @@ class AgentA:
             editor_gone = not any(_shown(e) for e in self.driver.find_elements(By.CSS_SELECTOR, "div.trumbowyg-editor"))
             if left_form or editor_gone:
                 log_agent_action("Agent A", f"✅ [RESPOND] Offer submitted for {offer_url}")
+                trace("SUBMITTED ok (left form)")
                 return True
-            log_agent_action("Agent A", f"⚠️ [RESPOND] clicked «Предложить» but still on form ({self.driver.current_url}) — possible validation error", level="WARNING")
+
+            # Still on form — capture WHY (which field/validation blocks submit) so it's
+            # diagnosable instead of a blind "possible validation error".
+            try:
+                errs = self.driver.execute_script(
+                    """
+                    var out = [];
+                    document.querySelectorAll(
+                        "[class*='error'],[class*='invalid'],[class*='danger'],.vs__dropdown-toggle,[role='alert']"
+                    ).forEach(function(el){
+                        var t = (el.innerText||'').trim();
+                        if (t && t.length < 200 && el.offsetParent !== null) out.push(t);
+                    });
+                    return out.slice(0, 12);
+                    """
+                )
+            except Exception:
+                errs = []
+            price_val = ""
+            try:
+                pv = self.driver.find_elements(By.CSS_SELECTOR, "input#offer-custom-price")
+                price_val = pv[0].get_attribute("value") if pv else ""
+            except Exception:
+                pass
+            trace(f"STILL ON FORM — price_val={price_val!r} duration={duration!r} visible_errors={errs}")
+            log_agent_action("Agent A", f"⚠️ [RESPOND] still on form — errors={errs} price={price_val!r}", level="WARNING")
             return False
 
         except Exception as e:
