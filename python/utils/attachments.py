@@ -32,7 +32,16 @@ def _ext(fname: str) -> str:
 
 
 def _download(url: str) -> bytes | None:
-    r = _request("GET", url, use_cookies=True)  # files need the authenticated session
+    # Make it look like a genuine same-origin file navigation from the project page.
+    dl_headers = {
+        "Referer": "https://kwork.ru/projects",
+        "Accept": "*/*",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-User": "?1",
+    }
+    r = _request("GET", url, use_cookies=True, extra_headers=dl_headers)  # files need auth
     if r is None:
         return None
     ctype = (r.headers.get("content-type") or "").lower()
