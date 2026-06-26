@@ -12,7 +12,7 @@ def _build_options() -> uc.ChromeOptions:
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1280,800")
+    options.add_argument("--window-size=900,700")
     options.add_argument("--mute-audio")
     options.add_argument("--disable-background-networking")
     options.add_argument("--disable-default-apps")
@@ -26,7 +26,9 @@ def _build_options() -> uc.ChromeOptions:
     options.add_argument("--disable-software-rasterizer")
     options.add_argument("--disable-background-timer-throttling")
     options.add_argument("--disk-cache-size=0")                   # no on-disk/in-mem cache growth
-    options.add_argument("--js-flags=--max-old-space-size=256")   # cap V8 heap
+    options.add_argument("--js-flags=--max-old-space-size=128")   # cap V8 heap (tight for 512MB)
+    options.add_argument("--disable-features=site-per-process,IsolateOrigins,TranslateUI")
+    options.add_argument("--disable-back-forward-cache")
     options.page_load_strategy = "eager"
     return options
 
