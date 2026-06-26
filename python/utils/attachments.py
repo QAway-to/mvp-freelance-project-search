@@ -15,7 +15,6 @@ import urllib.request
 
 from config import config
 from utils.logger import log_agent_action
-from agents.kwork_http import _request  # shared rate-limited choke point
 
 _MAX_FILES = int(os.getenv("ATTACH_MAX_FILES", "3"))
 _MAX_BYTES = int(os.getenv("ATTACH_MAX_BYTES", str(5 * 1024 * 1024)))  # skip files > 5MB
@@ -29,30 +28,6 @@ _IMG_EXT = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
 def _ext(fname: str) -> str:
     fname = fname or ""
     return fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
-
-
-def _download(url: str) -> bytes | None:
-    # Make it look like a genuine same-origin file navigation from the project page.
-    dl_headers = {
-        "Referer": "https://kwork.ru/projects",
-        "Accept": "*/*",
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "same-origin",
-        "Sec-Fetch-User": "?1",
-    }
-    r = _request("GET", url, use_cookies=True, extra_headers=dl_headers)  # files need auth
-    if r is None:
-        return None
-    ctype = (r.headers.get("content-type") or "").lower()
-    content = r.content or b""
-    if "text/html" in ctype:
-        log_agent_action("Attachments", "⚠️ download returned HTML (auth/login gate?) — skipping", level="WARNING")
-        return None
-    if len(content) > _MAX_BYTES:
-        log_agent_action("Attachments", f"⚠️ file too large ({len(content)} bytes) — skipping", level="WARNING")
-        return None
-    return content
 
 
 def _docx_text(data: bytes) -> str:
@@ -97,19 +72,28 @@ def extract_attachments_text(files: list[dict]) -> str:
     Synchronous (download + parse + vision are blocking) — call via
     asyncio.to_thread from async code. Returns "" if nothing usable.
     """
-    if not files:
+    specs = [f for f in (files or []) if (f or {}).get("url")][:_MAX_FILES]
+    if not specs:
         return ""
+
+    # Kwork serves files only to a real authenticated browser, so download them
+    # with Selenium (one Chrome session for all files), then read the bytes.
+    from utils.selenium_download import download_attachments
+    blobs = download_attachments(specs)  # {fname: bytes}
+    if not blobs:
+        log_agent_action("Attachments", "⏭️ no attachments downloaded — generating КП without them")
+        return ""
+
     parts: list[str] = []
-    for f in files[:_MAX_FILES]:
-        url = (f or {}).get("url")
+    for f in specs:
         fname = (f or {}).get("fname") or "файл"
-        if not url:
+        data = blobs.get(fname)
+        if not data:
+            continue
+        if len(data) > _MAX_BYTES:
+            log_agent_action("Attachments", f"⚠️ «{fname}» too large ({len(data)} bytes) — skipping", level="WARNING")
             continue
         ext = _ext(fname)
-        data = _download(url)
-        if not data:
-            parts.append(f"[{fname}: не удалось скачать]")
-            continue
         try:
             if ext in _IMG_EXT:
                 text = _gemini_read_image(data, _IMG_EXT[ext])
@@ -129,5 +113,5 @@ def extract_attachments_text(files: list[dict]) -> str:
             parts.append(f"--- Вложение «{fname}» ---\n{text}")
             log_agent_action("Attachments", f"✅ read «{fname}» ({len(text)} chars)")
         else:
-            parts.append(f"[{fname}: содержимое не извлечено]")
+            log_agent_action("Attachments", f"⏭️ «{fname}» yielded no text — skipping", level="WARNING")
     return "\n\n".join(parts)
