@@ -271,6 +271,11 @@ def _map_want(want: dict[str, Any], page: int) -> Optional[dict[str, Any]]:
         "hired": hired,
         "budget_value": budget_value,
         "category_id": str(want.get("category_id") or ""),
+        "files": [
+            {"url": f.get("url"), "fname": f.get("fname")}
+            for f in (want.get("files") or [])
+            if f.get("url")
+        ],
         "page": page,
         "found_at": datetime.now().isoformat(),
     }

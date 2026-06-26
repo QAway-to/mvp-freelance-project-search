@@ -182,10 +182,19 @@ async def generate_cp(request: Request):
     description = (data.get("description") or "").strip()
     budget = data.get("budget") or "Не указан"
     title = data.get("title") or ""
+    files = data.get("files") or []
     if not description:
         return {"status": "error", "message": "Нет описания проекта — КП невозможно сгенерировать"}
+
+    attachments_text = ""
+    if files:
+        from utils.attachments import extract_attachments_text
+        attachments_text = await asyncio.to_thread(extract_attachments_text, files)
+
     from utils.cp_generator import generate_proposal
-    proposal = await generate_proposal({"description": description, "budget": budget, "title": title})
+    proposal = await generate_proposal(
+        {"description": description, "budget": budget, "title": title}, attachments_text
+    )
     return {"status": "success", "proposal": proposal}
 
 

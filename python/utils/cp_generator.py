@@ -17,13 +17,18 @@ def _load_system_prompt() -> str:
 SYSTEM_PROMPT = _load_system_prompt()
 
 
-async def generate_proposal(project: dict) -> str:
+async def generate_proposal(project: dict, attachments_text: str = "") -> str:
+    att = (attachments_text or "").strip()
+    attachments_block = (
+        f"СОДЕРЖИМОЕ ВЛОЖЕНИЙ К ЗАДАНИЮ (распознано автоматически — учти при составлении КП):\n{att}"
+        if att else "Вложения / детали: нет."
+    )
     task = (
         "ЗАДАЧА КЛИЕНТА:\n"
         f"{project.get('description') or '(описание не указано)'}\n\n"
         f"Название заказа: {project.get('title', '?')}\n"
         f"Бюджет клиента: {project.get('budget') or 'не указан'}\n\n"
-        "Вложения / детали: нет.\n\n"
+        f"{attachments_block}\n\n"
         "Напиши КП строго по системному промпту."
     )
     messages = [

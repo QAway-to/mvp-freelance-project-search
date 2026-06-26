@@ -8,12 +8,12 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
-  const { description, budget, title } = req.body
+  const { description, budget, title, files } = req.body
   if (!description) {
     return res.status(400).json({ error: 'description required' })
   }
 
-  const result = await generateCp({ description, budget, title })
+  const result = await generateCp({ description, budget, title, files })
 
   if (!result.proposal) {
     return res.status(502).json({ error: 'CP generation failed' })

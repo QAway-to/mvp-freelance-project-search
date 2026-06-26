@@ -48,6 +48,7 @@ export default function ProjectCard({ project, platform = 'kwork', authHeaders =
           description: project.description,
           budget: project.budget,
           title: project.title,
+          files: project.files || [],
         }),
       })
       const data = await res.json()
