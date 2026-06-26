@@ -1058,32 +1058,37 @@ class AgentA:
         return False
 
     def _fill_offer_title(self, title: str) -> bool:
-        """Fill the required «Название заказа» field — it's a textarea[name='name']
-        (NOT the site search input, NOT the description editor)."""
+        """Fill «Название заказа» (textarea[name='name']). Like the КП field it's a
+        trumbowyg editor: the textarea is hidden and a contenteditable .trumbowyg-editor
+        is shown. Fill BOTH the editor and the underlying textarea via JS + events."""
         title = (title or "").strip()
         if not title:
             return False
-        cands = self.driver.find_elements(
-            By.CSS_SELECTOR,
-            "textarea[name='name'], textarea[placeholder*='азвани'], input[placeholder*='азвани']",
-        )
-        for inp in cands:
-            try:
-                if not inp.is_displayed():
-                    continue
-                self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp)
-                inp.click()
-                inp.clear()
-                inp.send_keys(title[:100])
-                self.driver.execute_script(
-                    "var el=arguments[0];['input','change','blur'].forEach(function(t){el.dispatchEvent(new Event(t,{bubbles:true}));});",
-                    inp,
-                )
-                self.human_delay(0.2, 0.4)
-                log_agent_action("Agent A", f"📨 [RESPOND] offer title → {title[:50]!r}")
+        js = r"""
+        var title = arguments[0];
+        var ta = document.querySelector("textarea[name='name']");
+        if (!ta) return 'no-textarea';
+        var fire = function(el){['input','keyup','change','blur'].forEach(function(t){
+            el.dispatchEvent(new Event(t, {bubbles:true}));
+        });};
+        var box = ta.closest('.trumbowyg');
+        if (box) {
+            var ed = box.querySelector('.trumbowyg-editor');
+            if (ed) { ed.textContent = title; fire(ed); }
+        }
+        ta.value = title;
+        fire(ta);
+        return box ? 'editor+textarea' : 'textarea';
+        """
+        try:
+            res = self.driver.execute_script(js, title[:100])
+            self.human_delay(0.2, 0.4)
+            if res in ("editor+textarea", "textarea"):
+                log_agent_action("Agent A", f"📨 [RESPOND] offer title ({res}) → {title[:50]!r}")
                 return True
-            except Exception:
-                continue
+            log_agent_action("Agent A", f"⚠️ [RESPOND] title field not found ({res})", level="WARNING")
+        except Exception as e:
+            log_agent_action("Agent A", f"⚠️ [RESPOND] title fill error: {e}", level="WARNING")
         return False
 
     def _select_payment_order(self) -> bool:
