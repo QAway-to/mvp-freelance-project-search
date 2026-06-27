@@ -4,6 +4,7 @@ import ProjectSearchForm from '../src/components/ProjectSearchForm'
 import LogMonitor from '../src/components/LogMonitor'
 import { useLocalStorage } from '../src/hooks/useLocalStorage'
 import { useAuth } from '../src/hooks/useAuth'
+import { useBackendWake } from '../src/hooks/useBackendWake'
 
 const MAX_HISTORY = 10
 
@@ -52,6 +53,7 @@ function PasswordGate({ onLogin }) {
 
 export default function Home() {
   const { password, login, logout, authHeaders } = useAuth()
+  const backend = useBackendWake()
   const [platform, setPlatform] = useState('kwork')
 
   const [kworkProjects, setKworkProjects] = useState([])
@@ -226,7 +228,24 @@ export default function Home() {
           </button>
         </div>
 
-        <div className="card">
+        <div className={`card ${backend.state !== 'ready' ? 'card-gated' : ''}`}>
+          {backend.state !== 'ready' && (
+            <div className={`card-overlay ov-${backend.state}`}>
+              {backend.state === 'warming' ? (
+                <>
+                  <span className="bw-spinner" />
+                  <span className="bw-text">// бужу бэкенд… попытка {backend.attempt} · {backend.elapsed}s</span>
+                  <span className="bw-hint">поиск откроется, как только сервис ответит</span>
+                </>
+              ) : (
+                <>
+                  <span className="bw-dot bw-dot-err" />
+                  <span className="bw-text">// бэкенд не ответил за {backend.elapsed}s</span>
+                  <button type="button" className="bw-action" onClick={backend.run}>разбудить ещё раз</button>
+                </>
+              )}
+            </div>
+          )}
           {platform === 'kwork' ? (
             <ProjectSearchForm
               onSearch={handleKworkSearch}

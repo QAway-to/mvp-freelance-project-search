@@ -332,6 +332,77 @@ a {
   background: rgba(255, 74, 74, 0.04);
 }
 
+/* ── BACKEND WAKE GATE (overlay over the search card until backend is healthy) ── */
+.card-gated {
+  position: relative;
+}
+
+.card-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+.bw-text { color: var(--text); }
+
+.bw-hint {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
+.bw-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border-active);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+  flex-shrink: 0;
+}
+
+.bw-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  flex-shrink: 0;
+}
+
+.bw-dot-err {
+  background: var(--error);
+  box-shadow: 0 0 6px var(--error);
+}
+
+.bw-action {
+  background: none;
+  border: 1px solid var(--border-active);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.bw-action:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 /* ── RESULTS ── */
 .results-section { margin-top: 20px; }
 
