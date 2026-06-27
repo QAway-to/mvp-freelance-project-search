@@ -6,6 +6,20 @@ const SROK_OPTIONS = [
   '7 дней', '10 дней', '2 недели', '3 недели', '1 месяц', '2 месяца',
 ]
 
+// timeLeft is hours-remaining (number, from the Kwork HTTP path) or a raw
+// string (Workzilla). Render numbers as «1д 5ч» / «6ч» / «40мин»; pass strings through.
+function formatTimeLeft(timeLeft) {
+  const hours = Number(timeLeft)
+  if (isNaN(hours)) return timeLeft
+  if (hours >= 24) {
+    const d = Math.floor(hours / 24)
+    const h = Math.round(hours % 24)
+    return h > 0 ? `${d}д ${h}ч` : `${d}д`
+  }
+  if (hours >= 1) return `${Math.round(hours)}ч`
+  return `${Math.round(hours * 60)}мин`
+}
+
 export default function ProjectCard({ project, platform = 'kwork', authHeaders = {} }) {
   const [isCardExpanded, setIsCardExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -108,15 +122,14 @@ export default function ProjectCard({ project, platform = 'kwork', authHeaders =
           {project.budget && (
             <span><span className="meta-key">бюджет </span>{project.budget}</span>
           )}
-          {project.timeLeft != null && (
-            <span><span className="meta-key">time </span>{
-              isNaN(Number(project.timeLeft))
-                ? project.timeLeft
-                : `${Number(project.timeLeft).toFixed(2)}h`
-            }</span>
-          )}
           {project.proposals != null && (
             <span><span className="meta-key">откликов </span>{project.proposals}</span>
+          )}
+          {project.timeLeft != null && (
+            <span><span className="meta-key">осталось </span>{formatTimeLeft(project.timeLeft)}</span>
+          )}
+          {project.hired != null && (
+            <span><span className="meta-key">нанято </span>{project.hired}%</span>
           )}
         </div>
       )}
@@ -130,18 +143,17 @@ export default function ProjectCard({ project, platform = 'kwork', authHeaders =
           )}
 
           <div className="project-meta">
-            {project.timeLeft != null && (
-              <span><span className="meta-key">time </span>{
-                isNaN(Number(project.timeLeft))
-                  ? project.timeLeft
-                  : `${Number(project.timeLeft).toFixed(2)}h`
-              }</span>
-            )}
             {project.budget && (
               <span><span className="meta-key">бюджет </span>{project.budget}</span>
             )}
             {project.proposals != null && (
               <span><span className="meta-key">предложений </span>{project.proposals}</span>
+            )}
+            {project.timeLeft != null && (
+              <span><span className="meta-key">осталось </span>{formatTimeLeft(project.timeLeft)}</span>
+            )}
+            {project.hired != null && (
+              <span><span className="meta-key">нанято </span>{project.hired}%</span>
             )}
           </div>
 

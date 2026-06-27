@@ -24,6 +24,7 @@ import re
 import threading
 import time as _time
 from collections import deque
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Optional
 from urllib.parse import quote_plus
@@ -58,8 +59,16 @@ _TAG_RE = re.compile(r"<[^>]+>")
 _MIN_INTERVAL = float(os.getenv("KWORK_MIN_REQUEST_INTERVAL", "5"))    # sec between requests
 _HOURLY_CAP = int(os.getenv("KWORK_HOURLY_CAP", "120"))                # max requests / hour
 _CHALLENGE_COOLDOWN = float(os.getenv("KWORK_CHALLENGE_COOLDOWN", "900"))  # backoff on challenge
-_PAGES_PER_GROUP = int(os.getenv("KWORK_PAGES_PER_GROUP", "2"))  # newest pages per category group
-_PAGES_SCAN = int(os.getenv("KWORK_PAGES_SCAN", "3"))           # pages for the no-filter listing
+# Kwork lists projects newest-first, and a project's time-left shrinks the older it
+# is — so the soonest-expiring jobs sit on the LAST pages. We fetch page 1 (to learn
+# last_page), then walk from last_page backward (most-expiring first), collecting
+# until a page's minimum time-left climbs out of the urgency window, then stop.
+# _MAX_PAGES_PER_GROUP caps the worst case (wide / no urgency filter) to protect the
+# request budget (see _MIN_INTERVAL / _HOURLY_CAP).
+_MAX_PAGES_PER_GROUP = int(os.getenv("KWORK_MAX_PAGES_PER_GROUP", "20"))
+# Keep scanning this many pages past the first one that's fully out of the window —
+# a guard against time-left spread within a single page (pages aren't perfectly sorted).
+_STOP_BUFFER = int(os.getenv("KWORK_STOP_BUFFER_PAGES", "1"))
 
 _rl_lock = threading.Lock()
 _last_request_ts = 0.0
@@ -259,12 +268,16 @@ def _map_want(want: dict[str, Any], page: int) -> Optional[dict[str, Any]]:
     except (TypeError, ValueError):
         hired = None
     time_left = want.get("timeLeft") or ""
+    urgency_hours = _urgency_hours_from_timeleft(time_left)
     return {
         "id": str(wid),
         "title": want.get("name") or "",
         "url": f"https://kwork.ru/projects/{wid}/view",
         "urgency": time_left,
-        "urgency_hours": _urgency_hours_from_timeleft(time_left),
+        "urgency_hours": urgency_hours,
+        # Numeric hours-remaining for the UI (sortable). 999.0 is our "unknown"
+        # sentinel from _urgency_hours_from_timeleft → map to None so the card hides it.
+        "timeLeft": round(urgency_hours, 2) if urgency_hours < 999 else None,
         "budget": budget,
         "description": _clean_desc(want.get("description")),
         "proposals": proposals,
@@ -304,6 +317,64 @@ def _wl_from_url(url: str) -> Optional[dict]:
     return (_extract_state_data(html) or {}).get("wantsListData")
 
 
+def _page_min_urgency(wants: list[dict[str, Any]]) -> float:
+    """Smallest known time-left (hours) on a page; 999.0 if none are known."""
+    hrs = [_urgency_hours_from_timeleft(w.get("timeLeft") or "") for w in wants]
+    known = [h for h in hrs if h < 999]
+    return min(known) if known else 999.0
+
+
+def _collect_expiring(url_for_page: Callable[[int], str], max_urgency_hours: float, label: str) -> list[dict[str, Any]]:
+    """Collect wants from a newest-first listing, prioritising soonest-expiring.
+
+    Fetches page 1 (for `last_page`), then walks from the last page backward —
+    where the most-expiring jobs live — accumulating wants until a page's minimum
+    time-left rises above `max_urgency_hours` (earlier pages are even less urgent,
+    so we stop, with a small buffer for within-page spread). Bounded by
+    `_MAX_PAGES_PER_GROUP`. `url_for_page(page:int) -> str` builds each page URL.
+    """
+    wl1 = _wl_from_url(url_for_page(1))
+    if not wl1:
+        return []
+    collected: list[dict[str, Any]] = list(wl1.get("wants") or [])
+    pag = wl1.get("pagination") or {}
+    try:
+        last_page = int(pag.get("last_page") or 1)
+    except (TypeError, ValueError):
+        last_page = 1
+
+    # No urgency filter → "show everything", just bounded by the page cap.
+    filtering = 0 < max_urgency_hours < 9999
+    fetched = 1
+    misses = 0
+    for p in range(last_page, 1, -1):
+        if fetched >= _MAX_PAGES_PER_GROUP:
+            log_agent_action(
+                "KworkHTTP",
+                f"⚠️ [HTTP] {label}: page cap {_MAX_PAGES_PER_GROUP} reached "
+                f"(last_page={last_page}) — results may be incomplete for a wide filter",
+                level="WARNING",
+            )
+            break
+        wl = _wl_from_url(url_for_page(p))
+        fetched += 1
+        if not wl:
+            continue
+        page_wants = wl.get("wants") or []
+        if not page_wants:
+            continue  # empty page (maintenance / sparse tail) — don't penalise the miss counter
+        collected.extend(page_wants)
+        if filtering:
+            if _page_min_urgency(page_wants) > max_urgency_hours:
+                misses += 1
+                if misses > _STOP_BUFFER:
+                    break
+            else:
+                misses = 0
+    log_agent_action("KworkHTTP", f"🌐 [HTTP] {label}: scanned {fetched}/{last_page} page(s), {len(collected)} raw wants")
+    return collected
+
+
 def fetch_listing(params: Any, max_urgency_hours: float = 9999) -> list[dict[str, Any]]:
     """Fetch projects in the user's categories over public HTTP (no Chrome, no
     login) and keep the exact selected subcategories within the urgency window.
@@ -327,22 +398,22 @@ def fetch_listing(params: Any, max_urgency_hours: float = 9999) -> list[dict[str
 
         if categories and not keywords:
             groups = sorted(groups_for(categories))
-            log_agent_action("KworkHTTP", f"🌐 [HTTP] fetching {len(groups)} category group(s): {groups}")
+            log_agent_action("KworkHTTP", f"🌐 [HTTP] fetching {len(groups)} category group(s): {groups} (urgency≤{max_urgency_hours}h)")
             for g in groups:
-                for page in range(1, _PAGES_PER_GROUP + 1):
-                    wl = _wl_from_url(f"{config.KWORK_PROJECTS_URL}?c={g}&page={page}")
-                    if not wl:
-                        break
-                    collected.extend(wl.get("wants") or [])
+                collected.extend(_collect_expiring(
+                    lambda page, g=g: f"{config.KWORK_PROJECTS_URL}?c={g}&page={page}",
+                    max_urgency_hours,
+                    f"group {g}",
+                ))
                 scanned.append(g)
         else:
             # keyword search or no category filter — plain paged listing
-            for page in range(1, _PAGES_SCAN + 1):
-                wl = _wl_from_url(_build_url(params, page))
-                if not wl:
-                    break
-                collected.extend(wl.get("wants") or [])
-                scanned.append(page)
+            collected.extend(_collect_expiring(
+                lambda page: _build_url(params, page),
+                max_urgency_hours,
+                "keyword/all" if keywords else "all",
+            ))
+            scanned.append("kw" if keywords else "all")
 
         if not collected:
             log_agent_action("KworkHTTP", "⚠️ [HTTP] nothing fetched — returning []", level="WARNING")
@@ -356,7 +427,7 @@ def fetch_listing(params: Any, max_urgency_hours: float = 9999) -> list[dict[str
 
         if categories:
             projects = [p for p in projects if p["category_id"] in categories]
-        if max_urgency_hours and max_urgency_hours < 9999:
+        if 0 < max_urgency_hours < 9999:
             projects = [p for p in projects if p["urgency_hours"] <= max_urgency_hours]
 
         log_agent_action(
