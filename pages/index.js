@@ -5,6 +5,7 @@ import LogMonitor from '../src/components/LogMonitor'
 import { useLocalStorage } from '../src/hooks/useLocalStorage'
 import { useAuth } from '../src/hooks/useAuth'
 import { useBackendWake } from '../src/hooks/useBackendWake'
+import { logClientError } from '../src/utils/clientLogger'
 
 const MAX_HISTORY = 10
 
@@ -104,6 +105,7 @@ export default function Home() {
     } catch (err) {
       setKworkError(err.message || 'network error')
       setKworkStatus('error')
+      logClientError('search_failed', { endpoint: '/api/projects/search', message: err.message })
     } finally {
       setKworkLoading(false)
     }
@@ -153,6 +155,7 @@ export default function Home() {
     } catch (err) {
       setWzError(err.message || 'network error')
       setWzStatus('error')
+      logClientError('workzilla_search_failed', { endpoint: '/api/workzilla/search', message: err.message })
     } finally {
       setWzLoading(false)
     }
@@ -181,6 +184,7 @@ export default function Home() {
     } catch (err) {
       setKworkError(err.message || 'network error')
       setKworkStatus('error')
+      logClientError('parse_failed', { endpoint: '/api/projects/parse', message: err.message })
     } finally {
       setKworkLoading(false)
     }

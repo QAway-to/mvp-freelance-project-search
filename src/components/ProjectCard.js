@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { logClientError } from '../utils/clientLogger'
 
 // Срок выполнения — точные варианты из vue-select формы отклика Kwork (new_offer).
 const SROK_OPTIONS = [
@@ -72,8 +73,9 @@ export default function ProjectCard({ project, platform = 'kwork', authHeaders =
       } else {
         setCpState('error')
       }
-    } catch {
+    } catch (err) {
       setCpState('error')
+      logClientError('cp_generate_failed', { endpoint: '/api/projects/cp', message: err.message })
     }
   }
 
@@ -93,8 +95,12 @@ export default function ProjectCard({ project, platform = 'kwork', authHeaders =
         })
         const data = await res.json()
         setRespondState(data.success ? 'done' : 'error')
-      } catch {
+      } catch (err) {
         setRespondState('error')
+        logClientError('respond_failed', {
+          endpoint: platform === 'workzilla' ? '/api/workzilla/respond' : '/api/projects/respond',
+          message: err.message,
+        })
       }
     }
   }
