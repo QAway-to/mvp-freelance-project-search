@@ -43,12 +43,9 @@ class Config:
     KWORK_COOKIES: Optional[str] = os.getenv('KWORK_COOKIES')
 
     # Telegram
-    TELEGRAM_BOT_TOKEN: Optional[str] = os.getenv('TELEGRAM_BOT_TOKEN')
+    TELEGRAM_BOT_TOKEN: Optional[str] = os.getenv('TELEGRAM_TOKEN')
     TELEGRAM_CHANNEL_ID: Optional[str] = os.getenv('TELEGRAM_CHANNEL_ID')
-    # Bot polling is opt-in. The service only hosts the Telegram mini-app, so the
-    # bot stays off by default — otherwise getUpdates conflicts spam the logs and
-    # waste RAM on the 512MB tier. Set TELEGRAM_BOT_ENABLED=true to run the bot.
-    TELEGRAM_BOT_ENABLED: bool = os.getenv('TELEGRAM_BOT_ENABLED', 'false').strip().lower() in ('1', 'true', 'yes', 'on')
+    TELEGRAM_BOT_ENABLED: bool = os.getenv('TELEGRAM_BOT_ENABLED', 'true').strip().lower() in ('1', 'true', 'yes', 'on')
     
     # n8n Integration
     N8N_WEBHOOK_URL: Optional[str] = os.getenv('N8N_WEBHOOK_URL')
@@ -57,7 +54,7 @@ class Config:
     GEMINI_API_KEY: Optional[str] = os.getenv('GEMINI_API_KEY')
     # DeepSeek — chat completions and КП generation (direct paid API, OpenAI-compatible).
     # DEEPSEEK_MODEL: deepseek-v4-flash (default, non-thinking) or deepseek-v4-pro.
-    DEEPSEEK_API_KEY: Optional[str] = os.getenv('DEEPSEEK_API_KEY')
+    DEEPSEEK_API_KEY: Optional[str] = os.getenv('DEEP_SEEK_API_KEY')
     DEEPSEEK_MODEL: str = os.getenv('DEEPSEEK_MODEL', 'deepseek-v4-flash')
     SEMANTIC_SIMILARITY_THRESHOLD: float = float(os.getenv('SEMANTIC_SIMILARITY_THRESHOLD', '0.50'))  # Lowered from 0.75 to 0.50 for better matching
 
