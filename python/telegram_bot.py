@@ -23,6 +23,9 @@ def _load_system_prompt() -> str:
 
 _SYSTEM_PROMPT = _load_system_prompt()
 
+# Отдельный промпт для свободного чата в Telegram (меняй здесь)
+_CHAT_SYSTEM_PROMPT = "Ты — умный ассистент. Отвечай на русском языке, кратко и по делу."
+
 _MAX_HISTORY = 20
 
 
@@ -235,7 +238,7 @@ class TelegramBot:
         text = update.message.text.strip()
 
         if chat_id not in self._conversations:
-            self._conversations[chat_id] = [{"role": "system", "content": _SYSTEM_PROMPT}]
+            self._conversations[chat_id] = [{"role": "system", "content": _CHAT_SYSTEM_PROMPT}]
 
         conv = self._conversations[chat_id]
         conv.append({"role": "user", "content": text})
