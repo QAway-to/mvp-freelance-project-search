@@ -122,12 +122,16 @@ _TOPIC_VIDEOS: dict[str, str] = {
     "закаливание": "BAACAgIAAxkDAAIBfWpEezcX3nMGQU0RY8aSA3dp_HtEAALhlQAC5FcpSja2XjngTYNdPAQ",
     "бег по снегу": "BAACAgIAAxkDAAIBgGpEfUTbkFzB8Flt6RK_GSXKhJlyAALqlQAC5FcpSmtVPv4uGvoYPAQ",
     "тренировка бокс": "BAACAgIAAxkDAAIBgWpEfU33PREwDgfBYnPvozQJrU2QAALrlQAC5FcpSi8916ciVtpWPAQ",
+    "бег по пляжу": "BAACAgIAAxkDAAIBkGpEiOMClAjxv3xG5LRKlmxHoSTnAAIKlgAC5FcpSj2V9d4AARU35TwE",
+    "бег в воде": "BAACAgIAAxkDAAIBkWpEiOnmo8Q9gOGQSE_s2RO0TPOMAAILlgAC5FcpSkUcjJ7zKjRGPAQ",
 }
 
 _TOPIC_KEYWORDS: dict[str, list[str]] = {
     "закаливание": ["закал", "холодн", "лёд", "мороз", "терморегул"],
     "бег по снегу": ["снег", "по снег", "снегу"],
     "тренировка бокс": ["бокс", "единоборств", "удар", "тренировк"],
+    "бег по пляжу": ["пляж", "песок", "берег", "по песк"],
+    "бег в воде": ["в воде", "по воде", "по морю", "вода"],
 }
 
 
