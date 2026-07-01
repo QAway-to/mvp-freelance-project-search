@@ -521,23 +521,7 @@ class TelegramBot:
         if not is_premium and _MESSAGE_COUNTS.get(chat_id, 0) >= _FUNNEL_CTA_AT:
             reply += _CTA_TEXT
 
-        try:
-            if thinking_msg:
-                await thinking_msg.edit_text(reply, parse_mode="HTML")
-            else:
-                await update.message.reply_text(reply, parse_mode="HTML")
-        except TelegramError:
-            try:
-                if thinking_msg:
-                    await thinking_msg.edit_text(reply)
-                else:
-                    await update.message.reply_text(reply)
-            except TelegramError as e:
-                log_agent_action("Telegram", f"Failed to send reply: {e}", level="ERROR")
-
-        log_agent_action("Telegram", f"Chat reply sent ({len(reply)} chars)")
-
-        # Отправить тематическое видео — по теме или случайное
+        # Сначала видео — потом текст
         text_lower = text.lower()
         matched_file_id = None
         for topic, keywords in _TOPIC_KEYWORDS.items():
@@ -546,9 +530,25 @@ class TelegramBot:
                 break
         file_id = matched_file_id or random.choice(list(_TOPIC_VIDEOS.values()))
         try:
+            if thinking_msg:
+                await thinking_msg.delete()
+                thinking_msg = None
+        except TelegramError:
+            pass
+        try:
             await update.message.reply_video(video=file_id)
         except TelegramError as e:
             log_agent_action("Telegram", f"Failed to send video: {e}", level="WARNING")
+
+        try:
+            await update.message.reply_text(reply, parse_mode="HTML")
+        except TelegramError:
+            try:
+                await update.message.reply_text(reply)
+            except TelegramError as e:
+                log_agent_action("Telegram", f"Failed to send reply: {e}", level="ERROR")
+
+        log_agent_action("Telegram", f"Chat reply sent ({len(reply)} chars)")
 
     async def send_notification(self, text: str) -> None:
         if not self._app or not config.TELEGRAM_CHANNEL_ID:
