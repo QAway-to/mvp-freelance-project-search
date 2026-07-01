@@ -176,7 +176,7 @@ _MAX_HISTORY = 20
 _PREMIUM_USERS: set[str] = set()          # chat_id пользователей с оплатой (в памяти, сбрасывается при рестарте)
 _MESSAGE_COUNTS: dict[str, int] = {}      # счётчик сообщений для запуска CTA
 _USER_SENT_VIDEOS: dict[str, list[str]] = {}  # chat_id -> уже отправленные file_id
-_FUNNEL_CTA_AT = 3                         # после скольких сообщений показывать оффер
+_FUNNEL_CTA_AT = 5                         # после скольких сообщений показывать оффер
 _STARS_PRICE = 1000                        # 1000 Stars ≈ $20
 
 _CTA_TEXT = (
