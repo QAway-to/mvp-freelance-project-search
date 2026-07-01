@@ -2,7 +2,7 @@ import os
 from typing import Any
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, MessageHandler, CallbackQueryHandler, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from telegram.error import TelegramError
 
 from config import config
@@ -137,6 +137,7 @@ class TelegramBot:
             return
         try:
             self._app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
+            self._app.add_handler(CommandHandler("start", self._handle_start))
             self._app.add_handler(CallbackQueryHandler(self._handle_callback))
             self._app.add_handler(
                 MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message)
@@ -317,6 +318,28 @@ class TelegramBot:
             await query.message.reply_text(result_text, disable_web_page_preview=True)
         except TelegramError as e:
             log_agent_action("Telegram", f"Failed to send result: {e}", level="ERROR")
+
+    async def _handle_start(self, update: Update, context) -> None:
+        if not update.message:
+            return
+        welcome = (
+            "Привет! Я помощник Федерации Здоровья по теме бега и здорового образа жизни.\n\n"
+            "Можешь спросить меня о:\n"
+            "— беге босиком и его пользе\n"
+            "— видах бега и технике\n"
+            "— закаливании и терморегуляции\n"
+            "— самомассаже через ступни\n"
+            "— дыхании во время бега\n"
+            "— подготовке к марафону\n\n"
+            "Просто напиши свой вопрос — и мы разберём его подробно.\n\n"
+            "Наши соцсети:\n"
+            "TikTok: https://www.tiktok.com/@federaciya_zdoroviya\n"
+            "Telegram-канал: https://t.me/+u9rdrsCuJfhlYmI6"
+        )
+        try:
+            await update.message.reply_text(welcome, disable_web_page_preview=True)
+        except TelegramError as e:
+            log_agent_action("Telegram", f"Failed to send welcome: {e}", level="ERROR")
 
     async def _handle_message(self, update: Update, context) -> None:
         """Free-form chat with LLM."""
