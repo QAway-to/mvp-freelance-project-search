@@ -2,8 +2,8 @@ import os
 import random
 from typing import Any
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, PreCheckoutQueryHandler, filters
 from telegram.error import TelegramError
 
 from config import config
@@ -169,6 +169,23 @@ _CHAT_SYSTEM_PROMPT = """Ты — представитель Федерации 
 
 _MAX_HISTORY = 20
 
+# Воронка — платный доступ через Telegram Stars
+_PREMIUM_USERS: set[str] = set()          # chat_id пользователей с оплатой (в памяти, сбрасывается при рестарте)
+_MESSAGE_COUNTS: dict[str, int] = {}      # счётчик сообщений для запуска CTA
+_FUNNEL_CTA_AT = 3                         # после скольких сообщений показывать оффер
+_STARS_PRICE = 1000                        # 1000 Stars ≈ $20
+
+_CTA_TEXT = (
+    "\n\n———\n"
+    "<b>Хочешь глубже?</b> У нас есть полная база материалов, расширенные практики и персональные рекомендации.\n"
+    "Введи /buy — открой полный доступ за 1000 звёзд Telegram (~$20)."
+)
+
+_PREMIUM_UNLOCKED_TEXT = (
+    "Отлично! Доступ открыт. Теперь тебе доступны все материалы Федерации Здоровья.\n"
+    "Продолжай задавать вопросы — отвечу максимально подробно."
+)
+
 # file_id видео → отправляются после ответа по теме
 _TOPIC_VIDEOS: dict[str, str] = {
     "закаливание": "BAACAgIAAxkDAAIBfWpEezcX3nMGQU0RY8aSA3dp_HtEAALhlQAC5FcpSja2XjngTYNdPAQ",
@@ -207,6 +224,10 @@ class TelegramBot:
         try:
             self._app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
             self._app.add_handler(CommandHandler("start", self._handle_start))
+            self._app.add_handler(CommandHandler("buy", self._handle_buy))
+            self._app.add_handler(CommandHandler("testpay", self._handle_testpay))
+            self._app.add_handler(PreCheckoutQueryHandler(self._handle_precheckout))
+            self._app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, self._handle_payment_success))
             self._app.add_handler(CallbackQueryHandler(self._handle_callback))
             self._app.add_handler(
                 MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message)
@@ -388,6 +409,46 @@ class TelegramBot:
         except TelegramError as e:
             log_agent_action("Telegram", f"Failed to send result: {e}", level="ERROR")
 
+    async def _handle_buy(self, update: Update, context) -> None:
+        if not update.message:
+            return
+        try:
+            await update.message.reply_invoice(
+                title="Доступ к материалам Федерации Здоровья",
+                description="Полный доступ: расширенные практики, видеоматериалы и персональные рекомендации по бегу и долголетию.",
+                payload="premium_access",
+                currency="XTR",
+                prices=[LabeledPrice(label="Полный доступ", amount=_STARS_PRICE)],
+            )
+        except TelegramError as e:
+            log_agent_action("Telegram", f"Failed to send invoice: {e}", level="ERROR")
+
+    async def _handle_testpay(self, update: Update, context) -> None:
+        """MVP: открывает доступ без реальной оплаты для тестирования."""
+        if not update.message:
+            return
+        chat_id = str(update.effective_chat.id)
+        _PREMIUM_USERS.add(chat_id)
+        log_agent_action("Telegram", f"Test premium granted to {chat_id}")
+        try:
+            await update.message.reply_text(_PREMIUM_UNLOCKED_TEXT, parse_mode="HTML")
+        except TelegramError as e:
+            log_agent_action("Telegram", f"Failed to send testpay confirm: {e}", level="ERROR")
+
+    async def _handle_precheckout(self, update, context) -> None:
+        await update.pre_checkout_query.answer(ok=True)
+
+    async def _handle_payment_success(self, update: Update, context) -> None:
+        if not update.message:
+            return
+        chat_id = str(update.effective_chat.id)
+        _PREMIUM_USERS.add(chat_id)
+        log_agent_action("Telegram", f"Stars payment confirmed for {chat_id}")
+        try:
+            await update.message.reply_text(_PREMIUM_UNLOCKED_TEXT, parse_mode="HTML")
+        except TelegramError as e:
+            log_agent_action("Telegram", f"Failed to send payment confirm: {e}", level="ERROR")
+
     async def _handle_start(self, update: Update, context) -> None:
         if not update.message:
             return
@@ -421,6 +482,9 @@ class TelegramBot:
 
         chat_id = str(update.effective_chat.id)
         text = update.message.text.strip()
+        is_premium = chat_id in _PREMIUM_USERS
+
+        _MESSAGE_COUNTS[chat_id] = _MESSAGE_COUNTS.get(chat_id, 0) + 1
 
         if chat_id not in self._conversations:
             self._conversations[chat_id] = [{"role": "system", "content": _CHAT_SYSTEM_PROMPT}]
@@ -453,6 +517,9 @@ class TelegramBot:
         conv.append({"role": "assistant", "content": reply})
         if len(conv) > _MAX_HISTORY + 1:
             self._conversations[chat_id] = [conv[0]] + conv[-_MAX_HISTORY:]
+
+        if not is_premium and _MESSAGE_COUNTS.get(chat_id, 0) >= _FUNNEL_CTA_AT:
+            reply += _CTA_TEXT
 
         try:
             if thinking_msg:
