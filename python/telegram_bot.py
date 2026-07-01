@@ -120,10 +120,14 @@ _MAX_HISTORY = 20
 # file_id видео → отправляются после ответа по теме
 _TOPIC_VIDEOS: dict[str, str] = {
     "закаливание": "BAACAgIAAxkDAAIBfWpEezcX3nMGQU0RY8aSA3dp_HtEAALhlQAC5FcpSja2XjngTYNdPAQ",
+    "бег по снегу": "BAACAgIAAxkDAAIBgGpEfUTbkFzB8Flt6RK_GSXKhJlyAALqlQAC5FcpSmtVPv4uGvoYPAQ",
+    "тренировка бокс": "BAACAgIAAxkDAAIBgWpEfU33PREwDgfBYnPvozQJrU2QAALrlQAC5FcpSi8916ciVtpWPAQ",
 }
 
 _TOPIC_KEYWORDS: dict[str, list[str]] = {
-    "закаливание": ["закал", "холодн", "снег", "лёд", "мороз", "терморегул"],
+    "закаливание": ["закал", "холодн", "лёд", "мороз", "терморегул"],
+    "бег по снегу": ["снег", "по снег", "снегу"],
+    "тренировка бокс": ["бокс", "единоборств", "удар", "тренировк"],
 }
 
 
