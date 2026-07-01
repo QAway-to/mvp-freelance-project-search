@@ -385,6 +385,10 @@ class TelegramBot:
     async def _handle_start(self, update: Update, context) -> None:
         if not update.message:
             return
+        try:
+            await update.message.reply_photo(photo="AgACAgIAAxkDAAIBlGpEjyrhn3nTmkDj9hU9fh0JekdBAALGGGsb5FcpSiuxj4BBUhnnAQADAgADdwADPAQ")
+        except TelegramError as e:
+            log_agent_action("Telegram", f"Failed to send welcome photo: {e}", level="WARNING")
         welcome = (
             "Приветствую! На связи Богдан, глава Федерации Здоровья.\n\n"
             "Здесь мы говорим о беге, здоровье и практиках, которые реально работают — проверено на себе и тысячах людей.\n\n"
