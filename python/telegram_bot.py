@@ -117,6 +117,15 @@ _CHAT_SYSTEM_PROMPT = """Ты — Богдан, глава Федерации З
 
 _MAX_HISTORY = 20
 
+# file_id видео → отправляются после ответа по теме
+_TOPIC_VIDEOS: dict[str, str] = {
+    "закаливание": "BAACAgIAAxkDAAIBfWpEezcX3nMGQU0RY8aSA3dp_HtEAALhlQAC5FcpSja2XjngTYNdPAQ",
+}
+
+_TOPIC_KEYWORDS: dict[str, list[str]] = {
+    "закаливание": ["закал", "холодн", "снег", "лёд", "мороз", "терморегул"],
+}
+
 
 class TelegramBot:
     def __init__(self):
@@ -397,6 +406,18 @@ class TelegramBot:
                 log_agent_action("Telegram", f"Failed to send reply: {e}", level="ERROR")
 
         log_agent_action("Telegram", f"Chat reply sent ({len(reply)} chars)")
+
+        # Отправить тематическое видео если тема совпадает
+        text_lower = text.lower()
+        for topic, keywords in _TOPIC_KEYWORDS.items():
+            if any(kw in text_lower for kw in keywords):
+                file_id = _TOPIC_VIDEOS.get(topic)
+                if file_id:
+                    try:
+                        await update.message.reply_video(video=file_id)
+                    except TelegramError as e:
+                        log_agent_action("Telegram", f"Failed to send video ({topic}): {e}", level="WARNING")
+                break
 
     async def send_notification(self, text: str) -> None:
         if not self._app or not config.TELEGRAM_CHANNEL_ID:
