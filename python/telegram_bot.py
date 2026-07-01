@@ -37,7 +37,10 @@ _CHAT_SYSTEM_PROMPT = """Ты — представитель Федерации 
 — Без markdown-символов (**, *, #). Для выделения используй ТОЛЬКО HTML-теги Telegram: <b>важная фраза</b>
 — Выделяй жирным ключевые термины и важные мысли — 2-4 выделения на ответ
 — Нумерованные списки пиши цифрами: "1. ... 2. ..."
-— В конце каждого ответа оставь пустую строку, затем задай ОДИН осмысленный вопрос на отдельной строке, оберни его в <b>...</b>. Вопрос должен вытекать из темы разговора и быть каждый раз разным
+— В конце каждого ответа оставь пустую строку, затем задай ОДИН закрытый вопрос на отдельной строке, оберни его в <b>...</b>
+— Вопрос должен предлагать выбор между двумя конкретными темами из нашей базы, которые ещё не обсуждались. Формат: "Что разберём дальше — <b>тема А</b> или <b>тема Б</b>?"
+— Темы для выбора: бег по росе, бег по снегу, бег по камешкам, бег по песку, бег в воде, техника дыхания, виды бега (перекат/подушки/пальцы), закаливание, самомассаж через ступни, бег в дождь, как начать бегать, выбор кроссовок, бег для долголетия, бег перед закалкой
+— Не повторяй темы вопросов которые уже звучали в диалоге
 — Примерно в каждом третьем ответе (естественно и к месту) упомяни одну из соцсетей:
   TikTok: https://www.tiktok.com/@federaciya_zdoroviya
   Telegram-канал: https://t.me/+u9rdrsCuJfhlYmI6
@@ -172,6 +175,7 @@ _MAX_HISTORY = 20
 # Воронка — платный доступ через Telegram Stars
 _PREMIUM_USERS: set[str] = set()          # chat_id пользователей с оплатой (в памяти, сбрасывается при рестарте)
 _MESSAGE_COUNTS: dict[str, int] = {}      # счётчик сообщений для запуска CTA
+_USER_SENT_VIDEOS: dict[str, list[str]] = {}  # chat_id -> уже отправленные file_id
 _FUNNEL_CTA_AT = 3                         # после скольких сообщений показывать оффер
 _STARS_PRICE = 1000                        # 1000 Stars ≈ $20
 
@@ -521,14 +525,26 @@ class TelegramBot:
         if not is_premium and _MESSAGE_COUNTS.get(chat_id, 0) >= _FUNNEL_CTA_AT:
             reply += _CTA_TEXT
 
-        # Сначала видео — потом текст
+        # Сначала видео — потом текст. Не повторять уже отправленные.
         text_lower = text.lower()
         matched_file_id = None
         for topic, keywords in _TOPIC_KEYWORDS.items():
             if any(kw in text_lower for kw in keywords):
                 matched_file_id = _TOPIC_VIDEOS.get(topic)
                 break
-        file_id = matched_file_id or random.choice(list(_TOPIC_VIDEOS.values()))
+
+        sent = _USER_SENT_VIDEOS.setdefault(chat_id, [])
+        all_ids = list(_TOPIC_VIDEOS.values())
+        remaining = [fid for fid in all_ids if fid not in sent]
+        if not remaining:
+            sent.clear()
+            remaining = all_ids
+
+        if matched_file_id and matched_file_id not in sent:
+            file_id = matched_file_id
+        else:
+            file_id = random.choice(remaining)
+        sent.append(file_id)
         try:
             if thinking_msg:
                 await thinking_msg.delete()
