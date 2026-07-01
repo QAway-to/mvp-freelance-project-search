@@ -1,4 +1,5 @@
 import os
+import random
 from typing import Any
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -469,17 +470,18 @@ class TelegramBot:
 
         log_agent_action("Telegram", f"Chat reply sent ({len(reply)} chars)")
 
-        # Отправить тематическое видео если тема совпадает
+        # Отправить тематическое видео — по теме или случайное
         text_lower = text.lower()
+        matched_file_id = None
         for topic, keywords in _TOPIC_KEYWORDS.items():
             if any(kw in text_lower for kw in keywords):
-                file_id = _TOPIC_VIDEOS.get(topic)
-                if file_id:
-                    try:
-                        await update.message.reply_video(video=file_id)
-                    except TelegramError as e:
-                        log_agent_action("Telegram", f"Failed to send video ({topic}): {e}", level="WARNING")
+                matched_file_id = _TOPIC_VIDEOS.get(topic)
                 break
+        file_id = matched_file_id or random.choice(list(_TOPIC_VIDEOS.values()))
+        try:
+            await update.message.reply_video(video=file_id)
+        except TelegramError as e:
+            log_agent_action("Telegram", f"Failed to send video: {e}", level="WARNING")
 
     async def send_notification(self, text: str) -> None:
         if not self._app or not config.TELEGRAM_CHANNEL_ID:
