@@ -6,6 +6,7 @@ import { useLocalStorage } from '../src/hooks/useLocalStorage'
 import { useAuth } from '../src/hooks/useAuth'
 import { useBackendWake } from '../src/hooks/useBackendWake'
 import { logClientError } from '../src/utils/clientLogger'
+import { pollJob } from '../lib/jobPolling'
 
 const MAX_HISTORY = 10
 
@@ -76,86 +77,81 @@ export default function Home() {
 
   if (!password) return <PasswordGate onLogin={login} />
 
+  // Both searches run as server-side jobs consumed via short polls (see
+  // lib/jobPolling.js) — a multi-minute request does not survive the Telegram
+  // WebView suspending or Render's edge timeout, but 3-second polls do.
   const handleKworkSearch = async (searchParams) => {
+    // Re-entrancy guard: the button's disabled={isLoading} commits async in
+    // React 18, so a fast double-tap (common in mobile WebViews) can fire this
+    // twice → two poll loops over the same job → every card duplicated.
+    if (kworkLoading) return
     setKworkLoading(true)
     setKworkError(null)
     setKworkStatus('running')
     setKworkProjects([])
 
+    let collected = []
     try {
-      const response = await fetch('/api/projects/search', {
-        method: 'POST',
+      await pollJob({
+        startPath: '/api/projects/search-start',
+        statusPath: '/api/projects/search-status',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify(searchParams),
+        onBatch: (batch) => {
+          collected = [...collected, ...batch]
+          setKworkProjects(prev => [...prev, ...batch])
+        },
       })
-      const data = await response.json()
-
-      if (data.status === 'success') {
-        setKworkProjects(data.projects || [])
-        setKworkStatus('success')
-        setSearchHistory(prev => [{
-          id: Date.now(), timestamp: new Date().toISOString(),
-          params: { ...searchParams, platform: 'kwork' },
-          projects: data.projects || [],
-        }, ...prev].slice(0, MAX_HISTORY))
-      } else {
-        setKworkError(data.message || 'search failed')
-        setKworkStatus('error')
-      }
+      setKworkStatus('success')
+      setSearchHistory(prev => [{
+        id: Date.now(), timestamp: new Date().toISOString(),
+        params: { ...searchParams, platform: 'kwork' },
+        projects: collected,
+      }, ...prev].slice(0, MAX_HISTORY))
     } catch (err) {
-      setKworkError(err.message || 'network error')
+      const message = err.code === 'JOB_NOT_FOUND'
+        ? 'Сервер перезапустился во время поиска — запустите поиск ещё раз'
+        : (err.message || 'network error')
+      setKworkError(message)
       setKworkStatus('error')
-      logClientError('search_failed', { endpoint: '/api/projects/search', message: err.message })
+      logClientError('search_failed', { endpoint: '/api/projects/search-start', message: err.message })
     } finally {
       setKworkLoading(false)
     }
   }
 
   const handleWzSearch = async () => {
+    if (wzLoading) return
     setWzLoading(true)
     setWzError(null)
     setWzStatus('running')
     setWzProjects([])
 
     try {
-      const response = await fetch('/api/workzilla/search', {
-        method: 'POST',
+      await pollJob({
+        startPath: '/api/workzilla/search-start',
+        statusPath: '/api/workzilla/search-status',
         headers: authHeaders,
-      })
-
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop()
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          try {
-            const data = JSON.parse(line.slice(6))
-            if (data.done) {
-              setWzStatus('success')
-            } else if (data.error) {
-              setWzError(data.error)
-              setWzStatus('error')
-            } else if (data._update) {
+        onBatch: (batch) => {
+          for (const data of batch) {
+            if (data._update) {
               setWzProjects(prev => prev.map(p =>
                 p.id === data._update ? { ...p, description: data.description } : p
               ))
             } else {
               setWzProjects(prev => [...prev, data])
             }
-          } catch {}
-        }
-      }
+          }
+        },
+      })
+      setWzStatus('success')
     } catch (err) {
-      setWzError(err.message || 'network error')
+      const message = err.code === 'JOB_NOT_FOUND'
+        ? 'Сервер перезапустился во время поиска — запустите поиск ещё раз'
+        : (err.message || 'network error')
+      setWzError(message)
       setWzStatus('error')
-      logClientError('workzilla_search_failed', { endpoint: '/api/workzilla/search', message: err.message })
+      logClientError('workzilla_search_failed', { endpoint: '/api/workzilla/search-start', message: err.message })
     } finally {
       setWzLoading(false)
     }

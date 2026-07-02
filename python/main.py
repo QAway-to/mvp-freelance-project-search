@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import queue
 import os
 import threading
@@ -12,6 +13,7 @@ import json
 from config import config
 from agents.agent_a import AgentA
 from agents.agent_workzilla import agent_workzilla
+from agents.job_store import Job, job_store
 from agents.search_params import SearchParams
 from telegram_bot import telegram_bot
 from browser import quit_driver
@@ -268,17 +270,12 @@ async def debug_offer_form(project: str):
 
 # ── Next.js proxy endpoints ────────────────────────────────────────────────────
 
-@app.post("/api/search")
-async def api_search(request: Request):
-    """Keyword search for Next.js UI proxy."""
-    import time
-    t0 = time.time()
-
-    data = await request.json()
+def _parse_search_request(data: dict) -> tuple[SearchParams, dict]:
+    """Parse the UI search body into SearchParams + business filters (shared by
+    the legacy synchronous /api/search and the job-based flow)."""
     keywords = (data.get("keywords") or "").strip()
     # None / missing timeLeft = no time filter (show all regardless of deadline)
     max_urgency = int(data["timeLeft"]) if data.get("timeLeft") is not None else 9999
-
     keywords_list = tuple(kw.strip() for kw in keywords.split(",") if kw.strip()) if keywords else ()
     categories = tuple(str(c).strip() for c in (data.get("categories") or []) if str(c).strip())
     params = SearchParams(
@@ -286,6 +283,182 @@ async def api_search(request: Request):
         max_urgency_hours=max_urgency,
         categories=categories,
     )
+    # `not in (None, "")` — an explicit 0 is a real filter value (e.g.
+    # proposalsMax=0 = "no proposals yet"), while the UI sends ""/null for unset.
+    def _num(key: str):
+        return int(data[key]) if data.get(key) not in (None, "") else None
+
+    filters = {
+        "hired_min": _num("hiredMin"),
+        "proposals_max": _num("proposalsMax"),
+        "budget_min": _num("budgetMin"),
+        "budget_max": _num("budgetMax"),
+    }
+    return params, filters
+
+
+def _passes_business_filters(p: dict, f: dict) -> bool:
+    """hired/proposals/budget filters. None value on the project = unknown;
+    include those (don't penalise missing data) — same semantics the batch
+    /api/search always had."""
+    if f["hired_min"] is not None and p.get("hired") is not None and p.get("hired", 0) < f["hired_min"]:
+        return False
+    if f["proposals_max"] is not None and p.get("proposals") is not None and p.get("proposals", 0) > f["proposals_max"]:
+        return False
+    if f["budget_min"] is not None and p.get("budget_value") is not None and p.get("budget_value", 0) < f["budget_min"]:
+        return False
+    if f["budget_max"] is not None and p.get("budget_value") is not None and p.get("budget_value", 0) > f["budget_max"]:
+        return False
+    return True
+
+
+# ── Job-based search (poll delivery) ───────────────────────────────────────────
+# A Kwork scrape is rate-limited to ≥5s/request and can run for many minutes.
+# One long HTTP response dies in the Telegram-miniapp WebView (suspend), at
+# Render's edge (~100s no-byte cutoff) and on free-tier cold starts. So: POST
+# creates a job and returns immediately; the scrape runs in a daemon thread
+# appending into job_store; the UI polls GET .../{job_id}?since=N.
+
+_WZ_JOB_DEADLINE_SECS = 300  # WZ scrape is short (≤15 cards); hard stop as a safety net
+
+
+def _run_kwork_job(job: "Job", params: SearchParams, filters: dict,
+                   loop: asyncio.AbstractEventLoop) -> None:
+    """Worker thread: run the Kwork search, streaming filtered projects into the
+    job store as listing pages arrive."""
+    job_store.set_status(job.id, "running")
+
+    def on_project(p: dict) -> None:
+        p.setdefault("evaluation", {"score": 1.0, "reasons": [], "suitable": True})
+        if _passes_business_filters(p, filters):
+            job_store.append(job.id, p)
+
+    def on_progress(meta: dict) -> None:
+        job_store.set_progress(job.id, meta)
+
+    try:
+        projects = agent_a.search_projects(
+            params, on_project=on_project, on_progress=on_progress,
+            should_stop=job.cancel.is_set,
+        )
+        # The HTTP path already streamed everything via on_project; this sweep
+        # covers the Selenium fallback (non-incremental) — append() dedupes.
+        for p in projects:
+            if _passes_business_filters(p, filters):
+                job_store.append(job.id, p)
+        job_store.set_status(job.id, "done")
+        if not job.cancel.is_set():
+            # Worker threads have no running loop: schedule coroutines on the captured one.
+            asyncio.run_coroutine_threadsafe(agent_a.notify_suitable_projects(projects), loop)
+    except Exception as exc:
+        log_agent_action("API", f"[SEARCH-JOB] job {job.id} failed: {exc}", level="ERROR")
+        job_store.set_error(job.id, str(exc))
+
+
+def _run_wz_job(job: "Job", loop: asyncio.AbstractEventLoop) -> None:
+    """Worker thread: drain the Workzilla scrape generator into the job store.
+    `_update` enrich events are appended as-is — the frontend already merges
+    them by id, so the poll stream keeps the exact SSE semantics."""
+    job_store.set_status(job.id, "running")
+    deadline = _time.time() + _WZ_JOB_DEADLINE_SECS
+    try:
+        for item in agent_workzilla.scrape_orders_iter():
+            if job.cancel.is_set() or _time.time() > deadline:
+                # Generator checks _cancel per card and releases its lock.
+                agent_workzilla._cancel.set()
+                if not job.cancel.is_set():
+                    job_store.mark_truncated(job.id)  # deadline stop = partial results
+            job_store.append(job.id, item)
+            if "_update" not in item:
+                asyncio.run_coroutine_threadsafe(_categorize_and_save([item]), loop)
+        job_store.set_status(job.id, "done")
+    except Exception as exc:
+        log_agent_action("API", f"[WZ-JOB] job {job.id} failed: {exc}", level="ERROR")
+        job_store.set_error(job.id, str(exc))
+
+
+@app.post("/api/search/jobs")
+async def api_search_job_create(request: Request):
+    data = await request.json()
+    params, filters = _parse_search_request(data)
+    fingerprint = hashlib.sha1(json.dumps(
+        {"kind": "kwork", "keywords": list(params.keywords_list),
+         "urgency": params.max_urgency_hours, "categories": sorted(params.categories),
+         "filters": filters},
+        sort_keys=True, ensure_ascii=False,
+    ).encode()).hexdigest()
+
+    loop = asyncio.get_running_loop()
+    job, reused = job_store.create("kwork", fingerprint)
+    if not reused:
+        threading.Thread(target=_run_kwork_job, args=(job, params, filters, loop), daemon=True).start()
+    log_agent_action("API", f"[SEARCH-JOB] {'reattached to' if reused else 'created'} job {job.id} "
+                            f"(keywords={list(params.keywords_list)}, categories={len(params.categories)})")
+    return JSONResponse({"success": True, "job_id": job.id, "reused": reused}, status_code=202)
+
+
+@app.get("/api/search/jobs/{job_id}")
+async def api_search_job_status(job_id: str, since: int = 0):
+    snap = job_store.snapshot(job_id, since)
+    if snap is None:
+        # In-memory store: after an OOM/deploy restart every old job_id lands here.
+        return JSONResponse({"success": False, "error": "JOB_NOT_FOUND"}, status_code=404)
+    return {"success": True, "job_id": job_id, **snap}
+
+
+@app.post("/api/search/jobs/{job_id}/cancel")
+async def api_search_job_cancel(job_id: str):
+    cancelled = job_store.cancel(job_id)
+    if not cancelled and job_store.snapshot(job_id) is None:
+        return JSONResponse({"success": False, "error": "JOB_NOT_FOUND"}, status_code=404)
+    # Idempotent: cancelling an already-finished job is a no-op success.
+    return {"success": True, "cancelled": cancelled}
+
+
+@app.post("/api/workzilla/jobs")
+async def workzilla_job_create():
+    loop = asyncio.get_running_loop()
+    # Constant fingerprint: WZ search has no params, and agent_workzilla._lock
+    # serializes scrapes anyway — concurrent requests share one job.
+    job, reused = job_store.create("workzilla", "workzilla")
+    if not reused:
+        threading.Thread(target=_run_wz_job, args=(job, loop), daemon=True).start()
+    log_agent_action("API", f"[WZ-JOB] {'reattached to' if reused else 'created'} job {job.id}")
+    return JSONResponse({"success": True, "job_id": job.id, "reused": reused}, status_code=202)
+
+
+@app.get("/api/workzilla/jobs/{job_id}")
+async def workzilla_job_status(job_id: str, since: int = 0):
+    snap = job_store.snapshot(job_id, since)
+    if snap is None:
+        return JSONResponse({"success": False, "error": "JOB_NOT_FOUND"}, status_code=404)
+    return {"success": True, "job_id": job_id, **snap}
+
+
+@app.post("/api/workzilla/jobs/{job_id}/cancel")
+async def workzilla_job_cancel(job_id: str):
+    cancelled = job_store.cancel(job_id)
+    if cancelled:
+        # Only when an ACTIVE job was transitioned: agent_workzilla._cancel is a
+        # process-wide Event — setting it off a stale/terminal job_id would abort
+        # whatever scrape is currently running for someone else's job.
+        agent_workzilla._cancel.set()
+        return {"success": True, "cancelled": True}
+    if job_store.snapshot(job_id) is None:
+        return JSONResponse({"success": False, "error": "JOB_NOT_FOUND"}, status_code=404)
+    return {"success": True, "cancelled": False}
+
+
+@app.post("/api/search")
+async def api_search(request: Request):
+    """Keyword search for Next.js UI proxy (legacy synchronous path — kept for
+    one release while the UI migrates to /api/search/jobs)."""
+    import time
+    t0 = time.time()
+
+    data = await request.json()
+    params, filters = _parse_search_request(data)
+    keywords = ",".join(params.keywords_list)
 
     log_agent_action("API", f"[SEARCH] request received: keywords={keywords!r} mode={config.MODE} driver={agent_a.driver is not None} logged_in={agent_a.logged_in}")
 
@@ -298,20 +471,7 @@ async def api_search(request: Request):
         log_agent_action("API", f"[SEARCH] thread raised exception: {exc}", level="ERROR")
         raise
 
-    hired_min = int(data["hiredMin"]) if data.get("hiredMin") else None
-    proposals_max = int(data["proposalsMax"]) if data.get("proposalsMax") else None
-    budget_min = int(data["budgetMin"]) if data.get("budgetMin") else None
-    budget_max = int(data["budgetMax"]) if data.get("budgetMax") else None
-
-    # None value = unknown; include those (don't penalise missing data)
-    if hired_min is not None:
-        projects = [p for p in projects if p.get("hired") is None or p.get("hired", 0) >= hired_min]
-    if proposals_max is not None:
-        projects = [p for p in projects if p.get("proposals") is None or p.get("proposals", 0) <= proposals_max]
-    if budget_min is not None:
-        projects = [p for p in projects if p.get("budget_value") is None or p.get("budget_value", 0) >= budget_min]
-    if budget_max is not None:
-        projects = [p for p in projects if p.get("budget_value") is None or p.get("budget_value", 0) <= budget_max]
+    projects = [p for p in projects if _passes_business_filters(p, filters)]
 
     log_agent_action("API", f"[SEARCH] responding with {len(projects)} projects, total_time={time.time()-t0:.1f}s")
     return {"success": True, "data": projects, "meta": {"total": len(projects), "took_ms": round((time.time()-t0)*1000)}, "error": None}

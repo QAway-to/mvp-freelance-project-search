@@ -324,7 +324,9 @@ def _page_min_urgency(wants: list[dict[str, Any]]) -> float:
     return min(known) if known else 999.0
 
 
-def _collect_expiring(url_for_page: Callable[[int], str], max_urgency_hours: float, label: str) -> list[dict[str, Any]]:
+def _collect_expiring(url_for_page: Callable[[int], str], max_urgency_hours: float, label: str,
+                      on_page: Optional[Callable[[list[dict[str, Any]], dict[str, Any]], None]] = None,
+                      should_stop: Optional[Callable[[], bool]] = None) -> list[dict[str, Any]]:
     """Collect wants from a newest-first listing, prioritising soonest-expiring.
 
     Fetches page 1 (for `last_page`), then walks from the last page backward —
@@ -332,7 +334,20 @@ def _collect_expiring(url_for_page: Callable[[int], str], max_urgency_hours: flo
     time-left rises above `max_urgency_hours` (earlier pages are even less urgent,
     so we stop, with a small buffer for within-page spread). Bounded by
     `_MAX_PAGES_PER_GROUP`. `url_for_page(page:int) -> str` builds each page URL.
+
+    `on_page(page_wants, meta)` (optional) fires after every fetched page so the
+    caller can deliver results incrementally; `should_stop()` (optional) is
+    checked before each page fetch for cooperative cancellation.
     """
+
+    def _notify(page_wants: list[dict[str, Any]], fetched: int, last_page: int) -> None:
+        if on_page is None:
+            return
+        try:
+            on_page(page_wants, {"label": label, "fetched": fetched, "last_page": last_page})
+        except Exception as e:  # a broken callback must never kill the scrape
+            log_agent_action("KworkHTTP", f"⚠️ [HTTP] on_page callback error: {e}", level="WARNING")
+
     wl1 = _wl_from_url(url_for_page(1))
     if not wl1:
         return []
@@ -342,12 +357,16 @@ def _collect_expiring(url_for_page: Callable[[int], str], max_urgency_hours: flo
         last_page = int(pag.get("last_page") or 1)
     except (TypeError, ValueError):
         last_page = 1
+    _notify(collected, 1, last_page)
 
     # No urgency filter → "show everything", just bounded by the page cap.
     filtering = 0 < max_urgency_hours < 9999
     fetched = 1
     misses = 0
     for p in range(last_page, 1, -1):
+        if should_stop is not None and should_stop():
+            log_agent_action("KworkHTTP", f"🛑 [HTTP] {label}: cancelled by caller — stopping", level="WARNING")
+            break
         if fetched >= _MAX_PAGES_PER_GROUP:
             log_agent_action(
                 "KworkHTTP",
@@ -364,6 +383,7 @@ def _collect_expiring(url_for_page: Callable[[int], str], max_urgency_hours: flo
         if not page_wants:
             continue  # empty page (maintenance / sparse tail) — don't penalise the miss counter
         collected.extend(page_wants)
+        _notify(page_wants, fetched, last_page)
         if filtering:
             if _page_min_urgency(page_wants) > max_urgency_hours:
                 misses += 1
@@ -375,7 +395,10 @@ def _collect_expiring(url_for_page: Callable[[int], str], max_urgency_hours: flo
     return collected
 
 
-def fetch_listing(params: Any, max_urgency_hours: float = 9999) -> list[dict[str, Any]]:
+def fetch_listing(params: Any, max_urgency_hours: float = 9999,
+                  on_project: Optional[Callable[[dict[str, Any]], None]] = None,
+                  on_progress: Optional[Callable[[dict[str, Any]], None]] = None,
+                  should_stop: Optional[Callable[[], bool]] = None) -> list[dict[str, Any]]:
     """Fetch projects in the user's categories over public HTTP (no Chrome, no
     login) and keep the exact selected subcategories within the urgency window.
 
@@ -383,6 +406,11 @@ def fetch_listing(params: Any, max_urgency_hours: float = 9999) -> list[dict[str
     per group that contains a selected subcategory — at most 7), newest first,
     then keep only the selected subcategory ids. Keyword searches and the
     no-filter case fall back to the plain paged listing. [] on failure.
+
+    Optional incremental delivery (job/poll flow): `on_project(project)` fires
+    per fully-filtered, deduped project as pages arrive; `on_progress(meta)`
+    fires per page; `should_stop()` cancels between page fetches. The returned
+    list is unchanged and identical to the non-incremental call.
     """
     if not CURL_CFFI_AVAILABLE:
         log_agent_action("KworkHTTP", "curl_cffi unavailable — skipping HTTP path", level="WARNING")
@@ -396,14 +424,52 @@ def fetch_listing(params: Any, max_urgency_hours: float = 9999) -> list[dict[str
         collected: list[dict[str, Any]] = []
         scanned: list = []
 
+        # Per-page emitter: applies the same map → category filter → urgency
+        # filter → url-dedupe as the final tail below, but per page, so the job
+        # worker can stream projects out while the (rate-limited) scan runs.
+        emitted_urls: set = set()
+
+        def _on_page(page_wants: list[dict[str, Any]], meta: dict[str, Any]) -> None:
+            if on_progress is not None:
+                try:
+                    on_progress(meta)
+                except Exception as e:
+                    log_agent_action("KworkHTTP", f"⚠️ [HTTP] on_progress callback error: {e}", level="WARNING")
+            if on_project is None:
+                return
+            for w in page_wants:
+                p = _map_want(w, 0)
+                if not p:
+                    continue
+                # Dedupe BEFORE filtering — same order as the final tail below
+                # (first sighting of a url wins and is filtered on its own
+                # values), so the emitted set always equals the returned set.
+                if p["url"] in emitted_urls:
+                    continue
+                emitted_urls.add(p["url"])
+                if categories and p["category_id"] not in categories:
+                    continue
+                if 0 < max_urgency_hours < 9999 and p["urgency_hours"] > max_urgency_hours:
+                    continue
+                try:
+                    on_project(p)
+                except Exception as e:
+                    log_agent_action("KworkHTTP", f"⚠️ [HTTP] on_project callback error: {e}", level="WARNING")
+
+        page_cb = _on_page if (on_project is not None or on_progress is not None) else None
+
         if categories and not keywords:
             groups = sorted(groups_for(categories))
             log_agent_action("KworkHTTP", f"🌐 [HTTP] fetching {len(groups)} category group(s): {groups} (urgency≤{max_urgency_hours}h)")
             for g in groups:
+                if should_stop is not None and should_stop():
+                    break
                 collected.extend(_collect_expiring(
                     lambda page, g=g: f"{config.KWORK_PROJECTS_URL}?c={g}&page={page}",
                     max_urgency_hours,
                     f"group {g}",
+                    on_page=page_cb,
+                    should_stop=should_stop,
                 ))
                 scanned.append(g)
         else:
@@ -412,6 +478,8 @@ def fetch_listing(params: Any, max_urgency_hours: float = 9999) -> list[dict[str
                 lambda page: _build_url(params, page),
                 max_urgency_hours,
                 "keyword/all" if keywords else "all",
+                on_page=page_cb,
+                should_stop=should_stop,
             ))
             scanned.append("kw" if keywords else "all")
 

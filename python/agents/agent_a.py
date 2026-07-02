@@ -331,15 +331,21 @@ class AgentA:
 
         time.sleep(duration % 2)  # Remaining time
 
-    def search_projects(self, params: SearchParams) -> List[Dict[str, Any]]:
-        """Search for projects with keywords"""
+    def search_projects(self, params: SearchParams, on_project=None, on_progress=None,
+                        should_stop=None) -> List[Dict[str, Any]]:
+        """Search for projects with keywords.
+
+        Optional callbacks (job/poll delivery): `on_project` fires per filtered
+        project as listing pages arrive, `on_progress` per page, `should_stop`
+        enables cooperative cancellation. See kwork_http.fetch_listing.
+        """
         keywords_str = ", ".join(params.keywords_list)
         log_agent_action("Agent A", f"Searching projects with keywords: {keywords_str}")
 
         if config.MODE == "demo":
             return self._generate_demo_projects()
         else:
-            return self._search_real_projects(params)
+            return self._search_real_projects(params, on_project, on_progress, should_stop)
 
     def _generate_demo_projects(self) -> List[Dict[str, Any]]:
         """Generate demo projects - DISABLED: Returns empty list"""
@@ -405,7 +411,8 @@ class AgentA:
             # On error, assume button is available (to be safe)
             return True
 
-    def _search_real_projects(self, params: SearchParams) -> List[Dict[str, Any]]:
+    def _search_real_projects(self, params: SearchParams, on_project=None, on_progress=None,
+                              should_stop=None) -> List[Dict[str, Any]]:
         """Real search on Kwork with pagination, proposal button check, and semantic ranking"""
         log_agent_action("Agent A", "🌐 [SELENIUM] Real search mode: accessing Kwork")
 
@@ -417,7 +424,10 @@ class AgentA:
         # nothing (e.g. cookies expired in favourites mode or layout changed).
         try:
             from agents.kwork_http import fetch_listing
-            http_projects = fetch_listing(params, getattr(params, "max_urgency_hours", 9999))
+            http_projects = fetch_listing(
+                params, getattr(params, "max_urgency_hours", 9999),
+                on_project=on_project, on_progress=on_progress, should_stop=should_stop,
+            )
         except Exception as e:
             import traceback
             log_agent_action("Agent A", f"[SEARCH] HTTP path raised: {e} — falling back to Selenium\n{traceback.format_exc()}", level="WARNING")
@@ -473,7 +483,8 @@ class AgentA:
         scraped_listing_pages = 0
         reverse_page_set = False  # guard: reverse-pagination redirect fires only once
 
-        while scraped_listing_pages < max_pages and len(all_projects) < max_relevant_projects:
+        while (scraped_listing_pages < max_pages and len(all_projects) < max_relevant_projects
+               and not (should_stop is not None and should_stop())):
             # Build search URL for current page
             # Inject budget filters if they exist
             budget_params = "&".join([f"prices-filters[]={f}" for f in params.budget_filters])
