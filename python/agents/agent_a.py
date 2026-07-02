@@ -444,6 +444,21 @@ class AgentA:
                 p.setdefault("evaluation", {"score": 1.0, "reasons": [], "suitable": True})
             log_agent_action("Agent A", f"📋 [HTTP] Returning {len(unique)} projects (Chrome-free path)")
             return unique
+
+        # NO Selenium fallback for search by default. Chrome on the 512MB tier
+        # starves the whole container for minutes (frozen polls, dropped log
+        # stream) and has OOM-killed the instance mid-search. Search is
+        # anonymous HTTP-only by design; an empty HTTP result (anti-bot
+        # cooldown, hourly cap, empty listing) returns fast and empty instead
+        # of slow and fatal. Chrome remains for offer submission/attachments.
+        if os.getenv("KWORK_SELENIUM_SEARCH_FALLBACK", "0") != "1":
+            log_agent_action(
+                "Agent A",
+                "[SEARCH] HTTP path empty — returning [] (Selenium search fallback disabled; "
+                "set KWORK_SELENIUM_SEARCH_FALLBACK=1 to re-enable)",
+                level="WARNING",
+            )
+            return []
         log_agent_action("Agent A", "[SEARCH] HTTP path empty — falling back to Selenium scrape", level="WARNING")
 
         if not self.driver:
