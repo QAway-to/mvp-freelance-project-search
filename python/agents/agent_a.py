@@ -413,10 +413,9 @@ class AgentA:
 
     def _search_real_projects(self, params: SearchParams, on_project=None, on_progress=None,
                               should_stop=None) -> List[Dict[str, Any]]:
-        """Real search on Kwork with pagination, proposal button check, and semantic ranking"""
-        log_agent_action("Agent A", "🌐 [SELENIUM] Real search mode: accessing Kwork")
-
-        log_agent_action("Agent A", f"[SEARCH] _search_real_projects start: driver={self.driver is not None} logged_in={self.logged_in}")
+        """Search Kwork over anonymous HTTP (no Chrome, no login). Selenium is only
+        reached if the HTTP path is empty AND KWORK_SELENIUM_SEARCH_FALLBACK=1."""
+        log_agent_action("Agent A", "🌐 [HTTP] Search start (anonymous, Chrome-free)")
 
         # --- HTTP-first listing: no headless Chrome → no OOM on the 512MB tier. ---
         # Anti-detect preserved at the network layer (Chrome TLS via curl_cffi +
