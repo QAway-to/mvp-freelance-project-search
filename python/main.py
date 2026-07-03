@@ -188,10 +188,23 @@ async def generate_cp(request: Request):
     if not description:
         return {"status": "error", "message": "Нет описания проекта — КП невозможно сгенерировать"}
 
+    # Attachments are downloaded via Selenium/Chrome — slow and OOM-prone on the
+    # 512MB tier. They must NEVER hold the whole КП hostage: time-box them and,
+    # on timeout/error, generate from the description alone (a КП without the
+    # attachment text is still a successful КП). This is what makes generation
+    # reliably succeed instead of hanging until the client times out.
     attachments_text = ""
     if files:
         from utils.attachments import extract_attachments_text
-        attachments_text = await asyncio.to_thread(extract_attachments_text, files)
+        try:
+            attachments_text = await asyncio.wait_for(
+                asyncio.to_thread(extract_attachments_text, files),
+                timeout=_ATTACH_EXTRACT_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            log_agent_action("API", f"[CP] attachments extraction exceeded {_ATTACH_EXTRACT_TIMEOUT}s — generating КП without them", level="WARNING")
+        except Exception as exc:
+            log_agent_action("API", f"[CP] attachments extraction failed ({exc}) — generating КП without them", level="WARNING")
 
     from utils.cp_generator import generate_proposal
     proposal = await generate_proposal(
@@ -320,6 +333,13 @@ def _passes_business_filters(p: dict, f: dict) -> bool:
 # appending into job_store; the UI polls GET .../{job_id}?since=N.
 
 _WZ_JOB_DEADLINE_SECS = 300  # WZ scrape is short (≤15 cards); hard stop as a safety net
+# Cap on Selenium attachment download+parse during КП generation. Past this we
+# drop the attachments and generate from the description — a successful КП beats
+# a hung one. Env-tunable in case a slow but working setup wants more headroom.
+# A bit above selenium_download's own 30s wall-clock budget (+Chrome launch), so
+# the worker thread finishes and reaps Chrome on its own instead of being
+# abandoned by wait_for. The outer cap is only a safety net for a stuck launch.
+_ATTACH_EXTRACT_TIMEOUT = float(os.getenv("ATTACH_EXTRACT_TIMEOUT", "50"))
 
 
 def _run_kwork_job(job: "Job", params: SearchParams, filters: dict,
@@ -347,9 +367,9 @@ def _run_kwork_job(job: "Job", params: SearchParams, filters: dict,
             if _passes_business_filters(p, filters):
                 job_store.append(job.id, p)
         job_store.set_status(job.id, "done")
-        if not job.cancel.is_set():
-            # Worker threads have no running loop: schedule coroutines on the captured one.
-            asyncio.run_coroutine_threadsafe(agent_a.notify_suitable_projects(projects), loop)
+        # Telegram notifications are intentionally NOT sent for manual UI/miniapp
+        # searches — a wide search fired 296 cards at the bot at once (spam). The
+        # autonomous background agent (run_session) still notifies; that's its job.
     except Exception as exc:
         log_agent_action("API", f"[SEARCH-JOB] job {job.id} failed: {exc}", level="ERROR")
         job_store.set_error(job.id, str(exc))

@@ -28,6 +28,7 @@ export default function ProjectCard({ project, platform = 'kwork', authHeaders =
 
   const [cpState, setCpState] = useState('idle') // idle | loading | done | error
   const [cpText, setCpText] = useState('')
+  const [cpError, setCpError] = useState('')
   const [respondState, setRespondState] = useState('idle') // idle | confirm | sending | done | error
   const [srok, setSrok] = useState('3 дня') // срок выполнения, выбирается вручную перед откликом
 
@@ -54,26 +55,56 @@ export default function ProjectCard({ project, platform = 'kwork', authHeaders =
     }
     setCpState('loading')
     setCpText('')
+    setCpError('')
     setRespondState('idle')
+
+    // Cold start (free tier spins down after 15 min idle) is the usual cause of
+    // a failed first generation. Auto-wake + one retry so generation SUCCEEDS on
+    // its own. Retry ONLY on 502/503 (backend genuinely down/cold) — NOT 504,
+    // which means the backend is still working (long attachment/LLM call); firing
+    // again would spawn a second Chrome. The retry also drops `files` so it can
+    // never trigger the Selenium attachment path a second time.
+    const generateOnce = (withFiles) => fetch('/api/projects/cp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify({
+        description: project.description,
+        budget: project.budget,
+        title: project.title,
+        files: withFiles ? (project.files || []) : [],
+      }),
+    })
+
     try {
-      const res = await fetch('/api/projects/cp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
-        body: JSON.stringify({
-          description: project.description,
-          budget: project.budget,
-          title: project.title,
-          files: project.files || [],
-        }),
-      })
-      const data = await res.json()
+      let res = await generateOnce(true)
+      let data = await res.json().catch(() => ({}))
+
+      if (!data.proposal && (res.status === 502 || res.status === 503)) {
+        // Wake the backend (short client-side cap so it can't block ~90s) and
+        // retry once without attachments — fast path, no Chrome.
+        const wakeCtl = new AbortController()
+        const wakeTimer = setTimeout(() => wakeCtl.abort(), 20_000)
+        await fetch('/api/wake', { headers: authHeaders, signal: wakeCtl.signal }).catch(() => {})
+        clearTimeout(wakeTimer)
+        await new Promise(r => setTimeout(r, 3000))
+        res = await generateOnce(false)
+        data = await res.json().catch(() => ({}))
+      }
+
       if (data.proposal) {
         setCpText(data.proposal)
         setCpState('done')
-      } else {
-        setCpState('error')
+        return
       }
+      // Fallback message only — this path should be rare now.
+      setCpError(
+        res.status === 504 ? 'Сервер долго отвечает — повтори через полминуты.'
+        : res.status === 503 || res.status === 502 ? 'Бэкенд не проснулся — повтори через минуту.'
+        : 'Не удалось сгенерировать КП. Повтори попытку.'
+      )
+      setCpState('error')
     } catch (err) {
+      setCpError('Обрыв связи при генерации — повтори попытку.')
       setCpState('error')
       logClientError('cp_generate_failed', { endpoint: '/api/projects/cp', message: err.message })
     }
@@ -196,7 +227,9 @@ export default function ProjectCard({ project, platform = 'kwork', authHeaders =
 
           {cpState === 'error' && (
             <p className="cp-error">
-              {!project.description ? 'Нет описания — КП невозможно сгенерировать.' : 'Ошибка генерации КП. Проверь DEEPSEEK_API_KEY.'}
+              {!project.description
+                ? 'Нет описания — КП невозможно сгенерировать.'
+                : (cpError || 'Не удалось сгенерировать КП. Повтори попытку.')}
             </p>
           )}
 

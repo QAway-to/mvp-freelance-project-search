@@ -25,6 +25,11 @@ from agents.agent_a import _normalize_cookie
 from utils.logger import log_agent_action
 
 _MAX_FILES = int(os.getenv("ATTACH_MAX_FILES", "3"))
+# Hard wall-clock budget for the whole Selenium download. Keeps Chrome's
+# lifetime bounded on the 512MB tier so it can't linger (and OOM) long after
+# the КП endpoint's outer timeout gave up waiting. КП generation proceeds
+# without any files that don't make it inside this window.
+_OVERALL_TIMEOUT = float(os.getenv("ATTACH_DOWNLOAD_BUDGET", "30"))
 
 
 def _cookies() -> list:
@@ -38,7 +43,7 @@ def _cookies() -> list:
         return []
 
 
-def _wait_download(dl_dir: str, before: set, timeout: int) -> str | None:
+def _wait_download(dl_dir: str, before: set, timeout: float) -> str | None:
     deadline = time.time() + timeout
     while time.time() < deadline:
         new = set(os.listdir(dl_dir)) - before
@@ -50,12 +55,18 @@ def _wait_download(dl_dir: str, before: set, timeout: int) -> str | None:
     return None
 
 
-def download_attachments(specs: list[dict], timeout: int = 60) -> dict:
-    """specs: [{"url","fname"}]. Returns {fname: bytes} for files that downloaded."""
+def download_attachments(specs: list[dict], timeout: int = 60,
+                         overall_timeout: float = _OVERALL_TIMEOUT) -> dict:
+    """specs: [{"url","fname"}]. Returns {fname: bytes} for files that downloaded.
+
+    `overall_timeout` is a hard wall-clock budget for the whole session: once it
+    elapses we stop starting/awaiting downloads and reap Chrome, so the browser
+    can't outlive the caller's own timeout and starve memory."""
     specs = [s for s in (specs or []) if s.get("url")][:_MAX_FILES]
     if not specs:
         return {}
 
+    deadline = time.time() + overall_timeout
     dl_dir = tempfile.mkdtemp(prefix="kwork_dl_")
     driver = None
     out: dict = {}
@@ -74,7 +85,7 @@ def download_attachments(specs: list[dict], timeout: int = 60) -> dict:
             browser_executable_path=_chrome_bin(),
             headless=True,
         )
-        driver.set_page_load_timeout(40)
+        driver.set_page_load_timeout(20)
         # Headless Chrome needs explicit permission to write downloads.
         try:
             driver.execute_cdp_cmd("Page.setDownloadBehavior",
@@ -94,13 +105,17 @@ def download_attachments(specs: list[dict], timeout: int = 60) -> dict:
         log_agent_action("SeleniumDL", f"🔐 authenticated, downloading {len(specs)} file(s)")
 
         for sp in specs:
+            remaining = deadline - time.time()
+            if remaining <= 1:
+                log_agent_action("SeleniumDL", "⏱️ download budget exhausted — stopping (КП will use what's read so far)", level="WARNING")
+                break
             url, fname = sp["url"], (sp.get("fname") or "file")
             before = set(os.listdir(dl_dir))
             try:
                 driver.get(url)  # navigation to a file URL triggers the download
             except Exception:
                 pass  # page "load" of a download often errors; the file still saves
-            path = _wait_download(dl_dir, before, timeout)
+            path = _wait_download(dl_dir, before, min(timeout, remaining))
             if path:
                 try:
                     with open(path, "rb") as fh:
