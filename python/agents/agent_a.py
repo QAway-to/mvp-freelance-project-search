@@ -1,5 +1,6 @@
 import asyncio
 import random
+import threading
 import time
 import re
 import os
@@ -66,6 +67,13 @@ class AgentA:
     def __init__(self):
         self.driver = None
         self.logged_in = False
+        # Serializes Selenium operations that share self.driver/self.logged_in.
+        # Concurrent offer submits (e.g. two cards submitted at once) run in
+        # separate worker threads; without this lock they race on the single
+        # shared Chrome — one thread's teardown/setup stomps the other's driver,
+        # corrupting the submit and producing exactly the false failures the job
+        # model is meant to eliminate. Each submit waits its turn instead.
+        self._selenium_lock = threading.Lock()
         self._evaluator = None  # lazy: only created when parse_single_url is called
         self.status = "stopped"
         self.last_run_time = None
@@ -1166,6 +1174,15 @@ class AgentA:
 
     def submit_response(self, url: str, cp_text: str, duration: str = None,
                         title: str = None, description: str = None) -> bool:
+        """Serialize offer submits on the shared Chrome. A concurrent submit for a
+        different offer would otherwise race on self.driver/self.logged_in; here
+        the second caller simply waits for the first to finish (its job stays
+        'running' and the UI keeps polling) instead of corrupting both."""
+        with self._selenium_lock:
+            return self._submit_response_locked(url, cp_text, duration, title, description)
+
+    def _submit_response_locked(self, url: str, cp_text: str, duration: str = None,
+                                title: str = None, description: str = None) -> bool:
         """Submit a response (отклик) on the Kwork new_offer form via Selenium.
 
         Fills the confirmed form fields and clicks «Предложить»:

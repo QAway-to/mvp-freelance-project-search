@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse, PlainTextResponse, JSONResponse
 import logging
 import json
+from typing import Optional
 
 from config import config
 from agents.agent_a import AgentA
@@ -467,6 +468,72 @@ async def workzilla_job_cancel(job_id: str):
     if job_store.snapshot(job_id) is None:
         return JSONResponse({"success": False, "error": "JOB_NOT_FOUND"}, status_code=404)
     return {"success": True, "cancelled": False}
+
+
+# ── Kwork offer submission as a job (poll delivery) ────────────────────────────
+# Submitting an offer drives Selenium (Chrome start + login + slow vue-select on
+# the memory-pressured 512MB tier) and takes ~3.5 min — right at the old 240s
+# client timeout, so a slow-but-successful submit surfaced as a false "Ошибка
+# отправки" and invited a duplicate re-submit. Same cure as search: POST returns
+# a job_id immediately; the submit runs in a worker thread; the UI polls the true
+# outcome. Single-flight on the offer URL structurally prevents a double submit.
+
+def _run_respond_job(job: "Job", url: str, cp_text: str,
+                     duration: Optional[str], title: Optional[str], description: Optional[str],
+                     loop: asyncio.AbstractEventLoop) -> None:
+    job_store.set_status(job.id, "running")
+    try:
+        ok = agent_a.submit_response(url, cp_text, duration, title, description)
+        job_store.append(job.id, {
+            "success": bool(ok),
+            "message": "Отклик отправлен" if ok else "Не удалось отправить отклик",
+        })
+        job_store.set_status(job.id, "done")
+    except Exception as exc:
+        log_agent_action("API", f"[RESPOND-JOB] job {job.id} failed: {exc}", level="ERROR")
+        job_store.set_error(job.id, str(exc))
+
+
+@app.post("/api/respond/jobs")
+async def api_respond_job_create(request: Request):
+    data = await request.json()
+    url = (data.get("url") or "").strip()
+    cp_text = (data.get("cp_text") or "").strip()
+    duration = (data.get("duration") or "").strip() or None
+    title = (data.get("title") or "").strip() or None
+    description = (data.get("description") or "").strip() or None
+    if not url or not cp_text:
+        raise HTTPException(status_code=400, detail="url and cp_text required")
+
+    loop = asyncio.get_running_loop()
+    # Fingerprint on the offer URL: a second submit for the same offer while one
+    # is in flight reattaches to it instead of starting a duplicate Selenium run.
+    job, reused = job_store.create("respond", f"respond:{url}")
+    if not reused:
+        threading.Thread(
+            target=_run_respond_job,
+            args=(job, url, cp_text, duration, title, description, loop),
+            daemon=True,
+        ).start()
+    log_agent_action("API", f"[RESPOND-JOB] {'reattached to' if reused else 'created'} job {job.id} for {url}")
+    return JSONResponse({"success": True, "job_id": job.id, "reused": reused}, status_code=202)
+
+
+@app.get("/api/respond/jobs/{job_id}")
+async def api_respond_job_status(job_id: str, since: int = 0):
+    snap = job_store.snapshot(job_id, since)
+    if snap is None:
+        return JSONResponse({"success": False, "error": "JOB_NOT_FOUND"}, status_code=404)
+    # The worker appends exactly one outcome dict on completion.
+    outcome = snap["results"][-1] if snap["results"] else None
+    return {
+        "success": True,
+        "job_id": job_id,
+        "status": snap["status"],
+        "outcome": outcome,
+        "next_since": snap["next_since"],
+        "error": snap["error"],
+    }
 
 
 @app.post("/api/search")

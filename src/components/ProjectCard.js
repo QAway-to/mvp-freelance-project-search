@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { logClientError } from '../utils/clientLogger'
+import { pollJob } from '../../lib/jobPolling'
 
 // Срок выполнения — точные варианты из vue-select формы отклика Kwork (new_offer).
 const SROK_OPTIONS = [
@@ -30,6 +31,11 @@ export default function ProjectCard({ project, platform = 'kwork', authHeaders =
   const [cpText, setCpText] = useState('')
   const [cpError, setCpError] = useState('')
   const [respondState, setRespondState] = useState('idle') // idle | confirm | sending | done | error
+  const [respondError, setRespondError] = useState('')
+  // Synchronous re-entrancy guard: `disabled` commits a render later, so a fast
+  // double-tap could otherwise start two poll loops (backend single-flight stops
+  // a real double submit, but two loops race the UI state).
+  const submittingRef = useRef(false)
   const [srok, setSrok] = useState('3 дня') // срок выполнения, выбирается вручную перед откликом
 
   const score = project.evaluation?.totalScore
@@ -111,28 +117,72 @@ export default function ProjectCard({ project, platform = 'kwork', authHeaders =
   }
 
   async function handleSubmitRespond() {
-    if (respondState === 'idle') {
+    // First tap (or a tap after a previous error) → arm the confirm step. From
+    // 'error' this is the retry path, so also clear the stale message.
+    if (respondState === 'idle' || respondState === 'error') {
+      setRespondError('')
       setRespondState('confirm')
       return
     }
-    if (respondState === 'confirm') {
-      setRespondState('sending')
-      try {
-        const endpoint = platform === 'workzilla' ? '/api/workzilla/respond' : '/api/projects/respond'
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHeaders },
-          body: JSON.stringify({ url: project.url, cp_text: cpText, duration: srok, title: project.title, description: project.description }),
-        })
-        const data = await res.json()
-        setRespondState(data.success ? 'done' : 'error')
-      } catch (err) {
-        setRespondState('error')
-        logClientError('respond_failed', {
-          endpoint: platform === 'workzilla' ? '/api/workzilla/respond' : '/api/projects/respond',
-          message: err.message,
-        })
+    if (respondState !== 'confirm') return
+    if (submittingRef.current) return
+    submittingRef.current = true
+
+    setRespondState('sending')
+    setRespondError('')
+
+    try {
+      // Workzilla submit is quick — keep it a plain request.
+      if (platform === 'workzilla') {
+        try {
+          const res = await fetch('/api/workzilla/respond', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders },
+            body: JSON.stringify({ url: project.url, cp_text: cpText }),
+          })
+          const data = await res.json()
+          setRespondState(data.success ? 'done' : 'error')
+        } catch (err) {
+          setRespondState('error')
+          logClientError('respond_failed', { endpoint: '/api/workzilla/respond', message: err.message })
+        }
+        return
       }
+
+      // Kwork submit drives Selenium (~3.5 min) — run it as a polled job so a
+      // slow-but-successful send is reported truthfully instead of timing out as
+      // a false error. Single-flight on the offer URL prevents a double submit.
+      let outcome = null
+      try {
+        await pollJob({
+          startPath: '/api/projects/respond-start',
+          statusPath: '/api/projects/respond-status',
+          headers: { 'Content-Type': 'application/json', ...authHeaders },
+          body: JSON.stringify({
+            url: project.url, cp_text: cpText, duration: srok,
+            title: project.title, description: project.description,
+          }),
+          onBatch: (batch) => { if (batch.length) outcome = batch[batch.length - 1] },
+        })
+        if (outcome && outcome.success) {
+          setRespondState('done')
+        } else {
+          setRespondError(outcome?.message || 'не удалось отправить — попробуй ещё раз')
+          setRespondState('error')
+        }
+      } catch (err) {
+        // JOB_NOT_FOUND = backend restarted mid-submit: the offer MAY already be on
+        // Kwork. Tell the user to check rather than re-submit blindly (avoids a dup).
+        setRespondError(
+          err.code === 'JOB_NOT_FOUND'
+            ? 'связь прервалась — проверь на Kwork, отклик мог уйти. Не отправляй повторно вслепую'
+            : (err.message || 'ошибка отправки')
+        )
+        setRespondState('error')
+        logClientError('respond_failed', { endpoint: '/api/projects/respond-start', message: err.message })
+      }
+    } finally {
+      submittingRef.current = false
     }
   }
 
@@ -242,7 +292,7 @@ export default function ProjectCard({ project, platform = 'kwork', authHeaders =
                   <span className="cp-status cp-status-ok">✓ отклик отправлен</span>
                 )}
                 {respondState === 'error' && (
-                  <span className="cp-status cp-status-err">✗ ошибка отправки</span>
+                  <span className="cp-status cp-status-err">✗ {respondError || 'ошибка отправки'}</span>
                 )}
                 {respondState !== 'done' && (
                   <>
