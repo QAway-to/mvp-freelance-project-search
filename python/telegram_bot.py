@@ -1,4 +1,3 @@
-import os
 import random
 from typing import Any
 
@@ -9,20 +8,6 @@ from telegram.error import TelegramError
 from config import config
 from utils.logger import log_agent_action
 from utils.llm import chat_completion
-
-_PROMPT_FILE = os.path.join(os.path.dirname(__file__), 'prompts', 'cp_system.txt')
-
-
-def _load_system_prompt() -> str:
-    try:
-        with open(_PROMPT_FILE, encoding='utf-8') as f:
-            return f.read().strip()
-    except Exception as e:
-        log_agent_action("Telegram", f"⚠️ Could not load cp_system.txt: {e}", level="WARNING")
-        return "Ты — Александр, фрилансер. Пишешь коммерческие предложения на русском языке. Пиши кратко, конкретно, без шаблонов."
-
-
-_SYSTEM_PROMPT = _load_system_prompt()
 
 # Отдельный промпт для свободного чата в Telegram (меняй здесь)
 _CHAT_SYSTEM_PROMPT = """Ты — представитель Федерации Здоровья. Говоришь от лица Федерации, прямо и по делу. Отвечай ТОЛЬКО на основе базы знаний ниже.
@@ -334,8 +319,12 @@ class TelegramBot:
         except TelegramError:
             pass
 
+        from utils.cp_generator import build_system_prompt
+        system_prompt, cp_type = await build_system_prompt(p)
+        log_agent_action("Telegram", f"тип задания для КП: {cp_type.value}")
+
         messages = [
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": (
                 f"Напиши КП для заказа с Kwork.\n\n"
                 f"Название: {title}\n"
