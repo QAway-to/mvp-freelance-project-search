@@ -17,6 +17,9 @@ out/
 .env.local
 .env.*.local
 
+# Runtime logs and the premium journal — contain real chat_ids of paying users
+python/logs/
+
 # Local temp / debug artifacts
 *tempdebug*.json
 C*tool-results*.txt

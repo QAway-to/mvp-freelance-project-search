@@ -1,4 +1,5 @@
-import random
+import asyncio
+from dataclasses import replace
 from typing import Any
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice
@@ -8,6 +9,8 @@ from telegram.error import TelegramError
 from config import config
 from utils.logger import log_agent_action
 from utils.llm import chat_completion
+from utils.content_library import ContentItem, library, parse_caption
+from utils.funnel_store import UserState, journal_premium, store
 
 # Отдельный промпт для свободного чата в Telegram (меняй здесь)
 _CHAT_SYSTEM_PROMPT = """Ты — представитель Федерации Здоровья. Говоришь от лица Федерации, прямо и по делу. Отвечай ТОЛЬКО на основе базы знаний ниже.
@@ -156,13 +159,15 @@ _CHAT_SYSTEM_PROMPT = """Ты — представитель Федерации 
 """
 
 _MAX_HISTORY = 20
+_MAX_CONVERSATIONS = 500   # сколько чатов держим в памяти на 512MB инстансе
 
-# Воронка — платный доступ через Telegram Stars
-_PREMIUM_USERS: set[str] = set()          # chat_id пользователей с оплатой (в памяти, сбрасывается при рестарте)
-_MESSAGE_COUNTS: dict[str, int] = {}      # счётчик сообщений для запуска CTA
-_USER_SENT_VIDEOS: dict[str, list[str]] = {}  # chat_id -> уже отправленные file_id
+# Воронка — платный доступ через Telegram Stars.
+# Состояние пользователей живёт в utils/funnel_store (Sheets + кеш в памяти),
+# ролики — в приватном канале (utils/content_library).
 _FUNNEL_CTA_AT = 5                         # после скольких сообщений показывать оффер
 _STARS_PRICE = 1000                        # 1000 Stars ≈ $20
+_REINDEX_MAX_SPAN = 200                    # сколько message_id за один /reindex
+_REINDEX_PAUSE = 0.3                       # пауза между пробами, чтобы не словить flood limit
 
 _CTA_TEXT = (
     "\n\n———\n"
@@ -175,21 +180,16 @@ _PREMIUM_UNLOCKED_TEXT = (
     "Продолжай задавать вопросы — отвечу максимально подробно."
 )
 
-# file_id видео → отправляются после ответа по теме
-_TOPIC_VIDEOS: dict[str, str] = {
+# Ролики, залитые до перехода на канал-библиотеку. Эти file_id действительны
+# только для этого бота, поэтому /migrate_legacy перекладывает их в канал —
+# оттуда они переиндексируются как обычные посты. После миграции блок можно
+# удалить.
+_LEGACY_VIDEOS: dict[str, str] = {
     "закаливание": "BAACAgIAAxkDAAIBfWpEezcX3nMGQU0RY8aSA3dp_HtEAALhlQAC5FcpSja2XjngTYNdPAQ",
-    "бег по снегу": "BAACAgIAAxkDAAIBgGpEfUTbkFzB8Flt6RK_GSXKhJlyAALqlQAC5FcpSmtVPv4uGvoYPAQ",
-    "тренировка бокс": "BAACAgIAAxkDAAIBgWpEfU33PREwDgfBYnPvozQJrU2QAALrlQAC5FcpSi8916ciVtpWPAQ",
-    "бег по пляжу": "BAACAgIAAxkDAAIBkGpEiOMClAjxv3xG5LRKlmxHoSTnAAIKlgAC5FcpSj2V9d4AARU35TwE",
-    "бег в воде": "BAACAgIAAxkDAAIBkWpEiOnmo8Q9gOGQSE_s2RO0TPOMAAILlgAC5FcpSkUcjJ7zKjRGPAQ",
-}
-
-_TOPIC_KEYWORDS: dict[str, list[str]] = {
-    "закаливание": ["закал", "холодн", "лёд", "мороз", "терморегул"],
-    "бег по снегу": ["снег", "по снег", "снегу"],
-    "тренировка бокс": ["бокс", "единоборств", "удар", "тренировк"],
-    "бег по пляжу": ["пляж", "песок", "берег", "по песк"],
-    "бег в воде": ["в воде", "по воде", "по морю", "вода"],
+    "снег": "BAACAgIAAxkDAAIBgGpEfUTbkFzB8Flt6RK_GSXKhJlyAALqlQAC5FcpSmtVPv4uGvoYPAQ",
+    "бокс": "BAACAgIAAxkDAAIBgWpEfU33PREwDgfBYnPvozQJrU2QAALrlQAC5FcpSi8916ciVtpWPAQ",
+    "пляж": "BAACAgIAAxkDAAIBkGpEiOMClAjxv3xG5LRKlmxHoSTnAAIKlgAC5FcpSj2V9d4AARU35TwE",
+    "вода": "BAACAgIAAxkDAAIBkWpEiOnmo8Q9gOGQSE_s2RO0TPOMAAILlgAC5FcpSkUcjJ7zKjRGPAQ",
 }
 
 
@@ -211,22 +211,46 @@ class TelegramBot:
             log_agent_action("Telegram", "Bot token not configured — disabled")
             return
         try:
-            self._app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
+            # concurrent_updates=False задан явно: обработчики читают состояние
+            # пользователя, потом уходят в await к LLM и сохраняют его обратно —
+            # параллельная обработка апдейтов одного чата затрёт счётчики.
+            self._app = (
+                Application.builder()
+                .token(config.TELEGRAM_BOT_TOKEN)
+                .concurrent_updates(False)
+                .build()
+            )
             self._app.add_handler(CommandHandler("start", self._handle_start))
             self._app.add_handler(CommandHandler("buy", self._handle_buy))
             self._app.add_handler(CommandHandler("testpay", self._handle_testpay))
+            self._app.add_handler(CommandHandler("reindex", self._handle_reindex))
+            self._app.add_handler(CommandHandler("migrate_legacy", self._handle_migrate_legacy))
             self._app.add_handler(PreCheckoutQueryHandler(self._handle_precheckout))
             self._app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, self._handle_payment_success))
             self._app.add_handler(CallbackQueryHandler(self._handle_callback))
+            # Посты в канале-библиотеке — до общего текстового хендлера,
+            # иначе подпись поста уйдёт в LLM как вопрос пользователя.
+            self._app.add_handler(
+                MessageHandler(filters.UpdateType.CHANNEL_POST, self._handle_channel_post)
+            )
             self._app.add_handler(
                 MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message)
             )
+
+            await store.start()
+            await library.load()
+
             await self._app.initialize()
             await self._app.start()
-            await self._app.updater.start_polling(drop_pending_updates=True)
-            log_agent_action("Telegram", "Bot started (polling)")
+            # drop_pending_updates=False: посты в канал, сделанные пока сервис
+            # спал, иначе потерялись бы вместе с индексом.
+            await self._app.updater.start_polling(drop_pending_updates=False)
+            log_agent_action("Telegram", f"Bot started (polling), {len(library)} videos indexed")
         except Exception as e:
             log_agent_action("Telegram", f"Bot startup failed: {e} — running without Telegram", level="WARNING")
+            # store.start() мог уже поднять фоновый флашер — иначе он останется
+            # сиротой и будет ходить в Sheets каждые 10с до конца жизни процесса.
+            await store.stop()
             self._app = None
 
     async def stop(self) -> None:
@@ -234,6 +258,7 @@ class TelegramBot:
             await self._app.updater.stop()
             await self._app.stop()
             await self._app.shutdown()
+            await store.stop()
             log_agent_action("Telegram", "Bot stopped")
 
     async def send_projects_for_confirmation(self, projects: list[dict[str, Any]]) -> None:
@@ -421,30 +446,88 @@ class TelegramBot:
         if not update.message:
             return
         chat_id = str(update.effective_chat.id)
-        _PREMIUM_USERS.add(chat_id)
-        log_agent_action("Telegram", f"Test premium granted to {chat_id}")
+        await self._grant_premium(chat_id, "testpay")
         try:
             await update.message.reply_text(_PREMIUM_UNLOCKED_TEXT, parse_mode="HTML")
         except TelegramError as e:
             log_agent_action("Telegram", f"Failed to send testpay confirm: {e}", level="ERROR")
 
     async def _handle_precheckout(self, update, context) -> None:
-        await update.pre_checkout_query.answer(ok=True)
+        query = update.pre_checkout_query
+        if query.invoice_payload != "premium_access":
+            await query.answer(ok=False, error_message="Неизвестный товар. Попробуй /buy заново.")
+            log_agent_action(
+                "Telegram", f"Rejected precheckout with payload {query.invoice_payload!r}", level="WARNING"
+            )
+            return
+        await query.answer(ok=True)
 
     async def _handle_payment_success(self, update: Update, context) -> None:
         if not update.message:
             return
         chat_id = str(update.effective_chat.id)
-        _PREMIUM_USERS.add(chat_id)
-        log_agent_action("Telegram", f"Stars payment confirmed for {chat_id}")
+        payment = update.message.successful_payment
+        await self._grant_premium(
+            chat_id,
+            "stars",
+            amount=getattr(payment, "total_amount", 0),
+            charge_id=getattr(payment, "telegram_payment_charge_id", ""),
+        )
         try:
             await update.message.reply_text(_PREMIUM_UNLOCKED_TEXT, parse_mode="HTML")
         except TelegramError as e:
             log_agent_action("Telegram", f"Failed to send payment confirm: {e}", level="ERROR")
 
+    async def _grant_premium(self, chat_id: str, reason: str, **details: Any) -> None:
+        """Persist the unlock immediately — a lost payment is not recoverable.
+
+        Order matters: the local journal is written first and synchronously, so
+        even a container killed before Sheets answers can restore the grant on
+        the next start.
+        """
+        journal_premium(chat_id, reason, details)
+        state = store.user(chat_id)
+        persisted = await store.save(replace(state, is_premium=True), immediate=True)
+        await store.event(chat_id, "premium_granted", reason=reason, **details)
+        log_agent_action("Telegram", f"Premium granted to {chat_id} ({reason})")
+
+        if not persisted:
+            # Диск на free tier эфемерный, поэтому журнал переживает не всякий
+            # рестарт. Telegram — единственный канал, который точно переживёт
+            # подмену контейнера: пусть запись останется хотя бы в чате админа.
+            await self._alert_admin(
+                "⚠️ <b>Оплата не записалась в Sheets</b>\n"
+                f"chat_id: <code>{chat_id}</code>\n"
+                f"причина: {reason}\n"
+                f"детали: <code>{details}</code>\n\n"
+                "Доступ выдан в памяти. Если сервис перезапустится до того, как "
+                "запись уйдёт, восстановите premium вручную по этому сообщению."
+            )
+
+    async def _alert_admin(self, text: str) -> None:
+        if not self._app or not config.ADMIN_CHAT_ID:
+            log_agent_action("Telegram", "ADMIN_CHAT_ID not set — alert dropped", level="ERROR")
+            return
+        try:
+            await self._app.bot.send_message(
+                chat_id=config.ADMIN_CHAT_ID, text=text, parse_mode="HTML"
+            )
+        except TelegramError as e:
+            log_agent_action("Telegram", f"Failed to alert admin: {e}", level="ERROR")
+
     async def _handle_start(self, update: Update, context) -> None:
         if not update.message:
             return
+
+        chat_id = str(update.effective_chat.id)
+        # Deep link: t.me/<bot>?start=tiktok -> источник трафика
+        source = (context.args[0] if getattr(context, "args", None) else "")[:40]
+        state = store.user(chat_id, source=source)
+        if source and not state.source:
+            state = replace(state, source=source)
+            await store.save(state)
+        await store.event(chat_id, "start", bucket=state.bucket, source=state.source)
+
         try:
             await update.message.reply_photo(photo="AgACAgIAAxkDAAIBlGpEjyrhn3nTmkDj9hU9fh0JekdBAALGGGsb5FcpSiuxj4BBUhnnAQADAgADdwADPAQ")
         except TelegramError as e:
@@ -475,12 +558,19 @@ class TelegramBot:
 
         chat_id = str(update.effective_chat.id)
         text = update.message.text.strip()
-        is_premium = chat_id in _PREMIUM_USERS
 
-        _MESSAGE_COUNTS[chat_id] = _MESSAGE_COUNTS.get(chat_id, 0) + 1
+        state = store.user(chat_id)
+        state = replace(state, messages=state.messages + 1)
+        await store.save(state)
+        is_premium = state.is_premium
 
         if chat_id not in self._conversations:
             self._conversations[chat_id] = [{"role": "system", "content": _CHAT_SYSTEM_PROMPT}]
+        else:
+            # LRU: перекладываем в конец, чтобы вытеснялись самые давние чаты
+            self._conversations[chat_id] = self._conversations.pop(chat_id)
+        while len(self._conversations) > _MAX_CONVERSATIONS:
+            self._conversations.pop(next(iter(self._conversations)))
 
         conv = self._conversations[chat_id]
         conv.append({"role": "user", "content": text})
@@ -511,39 +601,22 @@ class TelegramBot:
         if len(conv) > _MAX_HISTORY + 1:
             self._conversations[chat_id] = [conv[0]] + conv[-_MAX_HISTORY:]
 
-        if not is_premium and _MESSAGE_COUNTS.get(chat_id, 0) >= _FUNNEL_CTA_AT:
+        if not is_premium and state.messages >= _FUNNEL_CTA_AT:
             reply += _CTA_TEXT
+            state = replace(state, cta_shown=state.cta_shown + 1)
+            await store.save(state)
+            await store.event(chat_id, "cta_shown", bucket=state.bucket, at_message=state.messages)
 
-        # Сначала видео — потом текст. Не повторять уже отправленные.
-        text_lower = text.lower()
-        matched_file_id = None
-        for topic, keywords in _TOPIC_KEYWORDS.items():
-            if any(kw in text_lower for kw in keywords):
-                matched_file_id = _TOPIC_VIDEOS.get(topic)
-                break
-
-        sent = _USER_SENT_VIDEOS.setdefault(chat_id, [])
-        all_ids = list(_TOPIC_VIDEOS.values())
-        remaining = [fid for fid in all_ids if fid not in sent]
-        if not remaining:
-            sent.clear()
-            remaining = all_ids
-
-        if matched_file_id and matched_file_id not in sent:
-            file_id = matched_file_id
-        else:
-            file_id = random.choice(remaining)
-        sent.append(file_id)
         try:
             if thinking_msg:
                 await thinking_msg.delete()
                 thinking_msg = None
         except TelegramError:
             pass
-        try:
-            await update.message.reply_video(video=file_id)
-        except TelegramError as e:
-            log_agent_action("Telegram", f"Failed to send video: {e}", level="WARNING")
+
+        # Сначала видео — потом текст. Только по теме и только один раз:
+        # случайный ролик не в тему обесценивает остальные.
+        await self._send_topic_video(update, state, text)
 
         try:
             await update.message.reply_text(reply, parse_mode="HTML")
@@ -554,6 +627,130 @@ class TelegramBot:
                 log_agent_action("Telegram", f"Failed to send reply: {e}", level="ERROR")
 
         log_agent_action("Telegram", f"Chat reply sent ({len(reply)} chars)")
+
+    # ------------------------------------------------------------------
+    # Библиотека роликов (приватный канал)
+    # ------------------------------------------------------------------
+
+    async def _send_topic_video(self, update: Update, state: UserState, text: str) -> None:
+        """Отправить релевантный ролик из канала, если он есть и ещё не показан."""
+        if not config.CONTENT_CHANNEL_ID or not self._app:
+            return
+
+        item = library.match(text, is_premium=state.is_premium, exclude=state.seen_content)
+        if not item:
+            return
+
+        try:
+            await self._app.bot.copy_message(
+                chat_id=update.effective_chat.id,
+                from_chat_id=config.CONTENT_CHANNEL_ID,
+                message_id=item.message_id,
+            )
+        except TelegramError as e:
+            log_agent_action("Telegram", f"Failed to send video {item.message_id}: {e}", level="WARNING")
+            return
+
+        await store.save(replace(state, seen_content=state.seen_content + (item.message_id,)))
+        await store.event(
+            state.chat_id, "video_sent", message_id=item.message_id, title=item.title
+        )
+
+    async def _handle_channel_post(self, update: Update, context) -> None:
+        """Индексировать новый пост в канале-библиотеке."""
+        post = update.channel_post
+        if not post or not config.CONTENT_CHANNEL_ID:
+            return
+        if str(post.chat_id) != str(config.CONTENT_CHANNEL_ID):
+            return
+        if not (post.video or post.video_note or post.animation):
+            return
+
+        item = parse_caption(post.caption, post.message_id)
+        await library.upsert(item)
+        log_agent_action(
+            "Content",
+            f"Indexed post {item.message_id}: tags={','.join(item.tags) or '—'} tier={item.tier}",
+        )
+
+    def _is_admin(self, update: Update) -> bool:
+        return (
+            bool(config.ADMIN_CHAT_ID)
+            and str(update.effective_chat.id) == str(config.ADMIN_CHAT_ID)
+        )
+
+    async def _handle_reindex(self, update: Update, context) -> None:
+        """/reindex <from_id> <to_id> — пересобрать индекс по постам канала.
+
+        Bot API не умеет читать историю канала, поэтому каждый пост
+        пересылается сюда (единственный способ увидеть подпись) и сразу
+        удаляется.
+        """
+        if not update.message or not self._is_admin(update):
+            return
+        if not config.CONTENT_CHANNEL_ID:
+            await update.message.reply_text("CONTENT_CHANNEL_ID не задан.")
+            return
+
+        args = getattr(context, "args", None) or []
+        if len(args) != 2 or not all(a.isdigit() for a in args):
+            await update.message.reply_text("Формат: /reindex <от_id> <до_id>")
+            return
+
+        start_id, end_id = int(args[0]), int(args[1])
+        if end_id < start_id or end_id - start_id >= _REINDEX_MAX_SPAN:
+            await update.message.reply_text(f"Диапазон до {_REINDEX_MAX_SPAN} сообщений.")
+            return
+
+        progress = await update.message.reply_text(f"⏳ Сканирую {start_id}–{end_id}...")
+        found: list[ContentItem] = []
+        for message_id in range(start_id, end_id + 1):
+            try:
+                forwarded = await self._app.bot.forward_message(
+                    chat_id=update.effective_chat.id,
+                    from_chat_id=config.CONTENT_CHANNEL_ID,
+                    message_id=message_id,
+                )
+            except TelegramError:
+                continue  # дырка в нумерации или пост удалён
+            if forwarded.video or forwarded.video_note or forwarded.animation:
+                found.append(parse_caption(forwarded.caption, message_id))
+            try:
+                await self._app.bot.delete_message(
+                    chat_id=update.effective_chat.id, message_id=forwarded.message_id
+                )
+            except TelegramError:
+                pass
+            await asyncio.sleep(_REINDEX_PAUSE)
+
+        count = await library.upsert_many(found)
+        await progress.edit_text(f"✅ Проиндексировано роликов: {count}. Всего в библиотеке: {len(library)}")
+
+    async def _handle_migrate_legacy(self, update: Update, context) -> None:
+        """Перелить ролики из старых file_id в канал — без перезаливки файлов."""
+        if not update.message or not self._is_admin(update):
+            return
+        if not config.CONTENT_CHANNEL_ID:
+            await update.message.reply_text("CONTENT_CHANNEL_ID не задан.")
+            return
+
+        moved = 0
+        for tag, file_id in _LEGACY_VIDEOS.items():
+            try:
+                await self._app.bot.send_video(
+                    chat_id=config.CONTENT_CHANNEL_ID,
+                    video=file_id,
+                    caption=f"#{tag}\ntier: free",
+                )
+                moved += 1
+            except TelegramError as e:
+                log_agent_action("Telegram", f"Legacy migration failed for {tag}: {e}", level="WARNING")
+            await asyncio.sleep(_REINDEX_PAUSE)
+
+        await update.message.reply_text(
+            f"✅ Перенесено в канал: {moved} из {len(_LEGACY_VIDEOS)}.\n"
+            "Посты проиндексируются автоматически как обычные публикации."
+        )
 
     async def send_notification(self, text: str) -> None:
         if not self._app or not config.TELEGRAM_CHANNEL_ID:

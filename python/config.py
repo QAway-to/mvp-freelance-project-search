@@ -46,7 +46,14 @@ class Config:
     TELEGRAM_BOT_TOKEN: Optional[str] = os.getenv('TELEGRAM_BOT_TOKEN')
     TELEGRAM_CHANNEL_ID: Optional[str] = os.getenv('TELEGRAM_CHANNEL_ID')
     TELEGRAM_BOT_ENABLED: bool = os.getenv('TELEGRAM_BOT_ENABLED', 'true').strip().lower() in ('1', 'true', 'yes', 'on')
-    
+    # Private channel used as the video library (-100... form). Posts there are
+    # indexed and served to users via copy_message.
+    CONTENT_CHANNEL_ID: Optional[str] = os.getenv('CONTENT_CHANNEL_ID')
+    # Who may run /reindex. Also receives the throwaway forwards it uses to read
+    # captions, so it must be a private chat with the bot.
+    ADMIN_CHAT_ID: Optional[str] = os.getenv('ADMIN_CHAT_ID')
+
+
     # n8n Integration
     N8N_WEBHOOK_URL: Optional[str] = os.getenv('N8N_WEBHOOK_URL')
     

@@ -30,6 +30,10 @@ services:
         sync: false
       - key: TELEGRAM_CHAT_ID
         sync: false
+      - key: CONTENT_CHANNEL_ID
+        sync: false
+      - key: ADMIN_CHAT_ID
+        sync: false
       - key: WEBHOOK_PASSWORD
         sync: false
       - key: SHEETS_SCRIPT_URL
