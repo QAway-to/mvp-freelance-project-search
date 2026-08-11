@@ -850,6 +850,21 @@ class TelegramBot:
         if len(library):
             return
 
+        # "Chat not found" в каждой строчке ниже читается как загадка, поэтому
+        # сначала проверяем доступ к каналу и говорим прямо, что не так.
+        try:
+            chat = await self._app.bot.get_chat(config.CONTENT_CHANNEL_ID)
+            log_agent_action("Content", f"Канал доступен: {chat.title or chat.id}")
+        except TelegramError as e:
+            log_agent_action(
+                "Content",
+                f"НЕТ ДОСТУПА К КАНАЛУ {config.CONTENT_CHANNEL_ID} ({e}). "
+                "Добавьте бота администратором в канал — без этого роликов не будет. "
+                "Если бот уже добавлен, проверьте, что ID начинается с -100 и принадлежит каналу.",
+                level="ERROR",
+            )
+            return
+
         probe_chat = str(config.ADMIN_CHAT_ID or config.CONTENT_CHANNEL_ID)
         try:
             found = await self._scan_channel(probe_chat, _BOOTSTRAP_SCAN)
