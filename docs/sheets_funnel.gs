@@ -1,21 +1,23 @@
 /**
  * Apps Script для воронки Telegram-бота (Федерация Здоровья).
  *
- * УСТАНОВКА
- * 1. Откройте таблицу, куда сейчас пишутся заказы -> Расширения -> Apps Script.
- * 2. Вставьте этот код РЯДОМ с существующим, но:
- *    - переименуйте текущую функцию doPost в handleOrder_(payload)
- *      (внутри она уже работает с полями platform/category/title/... —
- *       менять её тело не нужно, только имя и то, что аргумент приходит
- *       готовым объектом, а не e);
- *    - если старый doPost парсил e.postData.contents — эту строку из него уберите.
- * 3. Развернуть -> Управление развёртываниями -> Изменить -> Новая версия.
- *    URL остаётся прежним, SHEETS_SCRIPT_URL менять не нужно.
+ * ГДЕ ЭТО ЖИВЁТ
+ * Проект "Untitled project" на script.google.com (папка Drive «Прочее»).
+ * Файлы: Code.gs (magic-link Workzilla), KWcategoriesSheet.gs (заказы Kwork),
+ * Funnel.gs (этот код).
+ *
+ * ИНТЕГРАЦИЯ СО СТАРЫМ КОДОМ
+ * В KWcategoriesSheet.gs функция doPost переименована в handleOrder_ и
+ * принимает исходное событие `e` без изменений — она сама проверяет секрет и
+ * сама парсит тело. Новый doPost ниже разбирает поле action и отдаёт легаси-
+ * вызовы (без action) в handleOrder_.
+ *
+ * Константы SECRET и SHEET_ID объявлены в KWcategoriesSheet.gs и переиспользуются
+ * здесь: в Apps Script все файлы проекта делят одну глобальную область, поэтому
+ * повторное объявление сломало бы проект.
  *
  * Листы users / events / content создаются автоматически при первом запросе.
  */
-
-var SECRET = 'ЗАМЕНИТЕ_НА_ЗНАЧЕНИЕ_SHEETS_SECRET';
 
 var USERS_HEADER = ['chat_id', 'bucket', 'is_premium', 'messages', 'cta_shown', 'source', 'seen_content', 'created_at'];
 var EVENTS_HEADER = ['ts', 'chat_id', 'event', 'payload'];
@@ -26,16 +28,14 @@ function doPost(e) {
     var payload = JSON.parse(e.postData.contents || '{}');
     var action = payload.action;
 
-    // Секрет приходит в теле (новые вызовы) либо в query (легаси sheets_writer).
-    var secret = payload.secret || e.parameter.secret;
-    if (secret !== SECRET) {
-      return json_({ error: 'forbidden' });
-    }
-    delete payload.secret;
-
-    // Обратная совместимость: старый вызов из utils/sheets_writer.py
+    // Легаси-вызов из utils/sheets_writer.py — секрет в query, action нет.
     if (!action) {
-      return handleOrder_(payload);
+      return handleOrder_(e);
+    }
+
+    // Секрет новых вызовов приходит в теле: URL попадает в логи и прокси.
+    if (payload.secret !== SECRET) {
+      return json_({ error: 'forbidden' });
     }
 
     switch (action) {
@@ -62,7 +62,7 @@ function json_(data) {
 }
 
 function sheet_(name, header) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = SpreadsheetApp.openById(SHEET_ID);
   var sh = ss.getSheetByName(name);
   if (!sh) {
     sh = ss.insertSheet(name);
@@ -103,7 +103,6 @@ function writeRow_(sh, header, obj, rowNumber) {
     var v = obj[key];
     return v === undefined || v === null ? '' : v;
   });
-  // chat_id и message_id пишем текстом, иначе Sheets съест длинные числа
   if (rowNumber) {
     sh.getRange(rowNumber, 1, 1, header.length).setValues([row]);
   } else {
