@@ -32,13 +32,15 @@ def test_offer_blocked_while_product_has_placeholders(prompts):
     assert any("метки" in b for b in result.blockers)
 
 
-def test_offer_blocked_without_purchase_url(prompts):
+def test_missing_purchase_url_does_not_block_the_funnel(prompts):
+    """Без ссылки воронка всё равно доводит до кнопки — блокируют только
+    выдуманные факты о продукте, они опаснее отсутствующей оплаты."""
     (prompts / "product.txt").write_text("ЦЕНА: 4900 руб.", encoding="utf-8")
 
     result = load_offer(None)
 
-    assert result.is_ready is False
-    assert any("PURCHASE_URL" in b for b in result.blockers)
+    assert result.is_ready is True
+    assert result.purchase_url == ""
 
 
 def test_offer_ready_when_everything_filled(prompts):

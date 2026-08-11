@@ -169,6 +169,7 @@ _FUNNEL_CTA_AT = config.FUNNEL_CTA_AT      # после скольких соо�
 _STARS_PRICE = 1000                        # 1000 Stars ≈ $20
 _REINDEX_MAX_SPAN = 200                    # сколько message_id за один /reindex
 _REINDEX_PAUSE = 0.3                       # пауза между пробами, чтобы не словить flood limit
+_BOOTSTRAP_SCAN = 60                       # сколько message_id пробуем при авто-старте
 
 _CTA_BUTTON = "🔗 Что входит и сколько стоит"
 
@@ -253,6 +254,9 @@ class TelegramBot:
             # спал, иначе потерялись бы вместе с индексом.
             await self._app.updater.start_polling(drop_pending_updates=False)
             log_agent_action("Telegram", f"Bot started (polling), {len(library)} videos indexed")
+            # Фоном: перебор постов канала занимает десятки секунд, а бот
+            # должен отвечать сразу.
+            asyncio.create_task(self._bootstrap_content())
         except Exception as e:
             log_agent_action("Telegram", f"Bot startup failed: {e} — running without Telegram", level="WARNING")
             # store.start() мог уже поднять фоновый флашер — иначе он останется
@@ -719,6 +723,14 @@ class TelegramBot:
             await query.message.reply_text("Подробности скоро — напиши мне, всё расскажу.")
             return
 
+        if not _OFFER.purchase_url:
+            log_agent_action("Telegram", "Offer clicked, but PURCHASE_URL is empty", level="WARNING")
+            await query.message.reply_text(
+                "Страница оплаты ещё подключается. Напиши мне — отвечу на любые вопросы "
+                "по программе и подскажу, с чего начать."
+            )
+            return
+
         separator = "&" if "?" in _OFFER.purchase_url else "?"
         url = f"{_OFFER.purchase_url}{separator}uid={chat_id}"
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Перейти к оплате", url=url)]])
@@ -798,6 +810,70 @@ class TelegramBot:
         except TelegramError:
             pass
         return True
+
+    async def _scan_channel(self, probe_chat: str, limit: int) -> list[ContentItem]:
+        """Собрать ролики, уже лежащие в канале.
+
+        Bot API не отдаёт историю канала, поэтому каждый пост пересылается и
+        сразу удаляется — единственный способ увидеть подпись.
+        """
+        found: list[ContentItem] = []
+        for message_id in range(1, limit + 1):
+            try:
+                forwarded = await self._app.bot.forward_message(
+                    chat_id=probe_chat,
+                    from_chat_id=config.CONTENT_CHANNEL_ID,
+                    message_id=message_id,
+                )
+            except TelegramError:
+                continue  # дырка в нумерации или пост удалён
+            if forwarded.video or forwarded.video_note or forwarded.animation:
+                found.append(parse_caption(forwarded.caption, message_id))
+            try:
+                await self._app.bot.delete_message(
+                    chat_id=probe_chat, message_id=forwarded.message_id
+                )
+            except TelegramError:
+                pass
+            await asyncio.sleep(_REINDEX_PAUSE)
+        return found
+
+    async def _bootstrap_content(self) -> None:
+        """Наполнить библиотеку без участия человека.
+
+        Сначала подбираем то, что уже лежит в канале; если там пусто — заливаем
+        легаси-ролики. Иначе индекс пришлось бы каждый раз восстанавливать
+        руками, а команду в Telegram может нажать только владелец.
+        """
+        if not config.CONTENT_CHANNEL_ID or not self._app:
+            return
+        if len(library):
+            return
+
+        probe_chat = str(config.ADMIN_CHAT_ID or config.CONTENT_CHANNEL_ID)
+        try:
+            found = await self._scan_channel(probe_chat, _BOOTSTRAP_SCAN)
+            if found:
+                await library.upsert_many(found)
+                log_agent_action("Content", f"Авто-индексация: найдено роликов {len(found)}")
+                return
+
+            log_agent_action("Content", "В канале роликов нет — переношу легаси")
+            moved = 0
+            for tag, file_id in _LEGACY_VIDEOS.items():
+                try:
+                    await self._app.bot.send_video(
+                        chat_id=config.CONTENT_CHANNEL_ID,
+                        video=file_id,
+                        caption=f"#{tag}\ntier: free",
+                    )
+                    moved += 1
+                except TelegramError as e:
+                    log_agent_action("Content", f"Легаси-ролик {tag} не перенесён: {e}", level="ERROR")
+                await asyncio.sleep(_REINDEX_PAUSE)
+            log_agent_action("Content", f"Перенесено легаси-роликов: {moved}")
+        except Exception as e:  # старт бота важнее наполнения библиотеки
+            log_agent_action("Content", f"Авто-наполнение прервано: {e}", level="ERROR")
 
     async def _handle_status(self, update: Update, context) -> None:
         """Что настроено, а что нет — видно прямо из бота."""

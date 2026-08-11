@@ -111,8 +111,13 @@ def load_offer(purchase_url: str | None) -> Offer:
         blockers.append("prompts/sales_block.txt пуст")
     if not cta or PLACEHOLDER_OPEN in cta:
         blockers.append("в prompts/offer_cta.txt нет текста или остались метки")
+    # PURCHASE_URL намеренно НЕ блокирует оффер: без него воронка всё равно
+    # доводит до кнопки, а на клике честно сообщает, что оплата не подключена.
+    # Блокируют только выдуманные факты о продукте — они опаснее.
     if not purchase_url:
-        blockers.append("не задан PURCHASE_URL")
+        log_agent_action(
+            "Offer", "PURCHASE_URL не задан — кнопка покупки без ссылки", level="WARNING"
+        )
 
     offer = Offer(
         product_card=product,

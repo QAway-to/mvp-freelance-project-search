@@ -28,12 +28,12 @@ class FakeQuery:
         self.message = FakeMessage()
 
 
-def _offer(*, ready: bool) -> Offer:
+def _offer(*, ready: bool, url: str = "https://pay.example/checkout") -> Offer:
     return Offer(
         product_card="ЦЕНА: 4900 руб." if ready else "ЦЕНА: <<сумма>>",
         sales_block="блок",
         cta_text="cta",
-        purchase_url="https://pay.example/checkout",
+        purchase_url=url,
         blockers=() if ready else ("не заполнена карточка",),
     )
 
@@ -59,6 +59,21 @@ async def test_click_gives_no_link_while_offer_unconfigured(monkeypatch, quiet_s
     assert len(sent) == 1
     assert "reply_markup" not in sent[0]          # никакой кнопки с URL
     assert "pay.example" not in sent[0]["text"]   # и никакой ссылки в тексте
+
+
+@pytest.mark.asyncio
+async def test_click_without_checkout_url_explains_instead_of_breaking(monkeypatch, quiet_store):
+    """Демо-режим: оффер настроен, оплата ещё не подключена."""
+    monkeypatch.setattr(bot_module, "_OFFER", _offer(ready=True, url=""))
+    bot = bot_module.TelegramBot()
+    query = FakeQuery()
+
+    await bot._handle_offer_click(query, "1")
+
+    sent = query.message.replies
+    assert len(sent) == 1
+    assert "reply_markup" not in sent[0]
+    assert "оплат" in sent[0]["text"].lower()
 
 
 @pytest.mark.asyncio
