@@ -52,6 +52,13 @@ class Config:
     # Who may run /reindex. Also receives the throwaway forwards it uses to read
     # captions, so it must be a private chat with the bot.
     ADMIN_CHAT_ID: Optional[str] = os.getenv('ADMIN_CHAT_ID')
+    # Касса внутри бота (Telegram Stars). Выключена: продажа закрывается вне
+    # бота, воронка только доводит до неё. Обработчики /buy, /testpay и
+    # платёжные апдейты не регистрируются, пока флаг не поднят.
+    PAYMENTS_ENABLED: bool = os.getenv('PAYMENTS_ENABLED', 'false').strip().lower() in ('1', 'true', 'yes', 'on')
+    # Внешняя страница оплаты. К ней добавляется ?uid=<chat_id>, чтобы платёж
+    # можно было связать с диалогом.
+    PURCHASE_URL: Optional[str] = os.getenv('PURCHASE_URL')
 
 
     # n8n Integration

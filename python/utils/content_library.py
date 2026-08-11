@@ -119,6 +119,9 @@ class ContentLibrary:
     def __len__(self) -> int:
         return len(self._items)
 
+    def premium_count(self) -> int:
+        return sum(1 for item in self._items.values() if item.tier == TIER_PREMIUM)
+
     async def load(self) -> None:
         rows = await sheets_api.call("content_all")
         if not isinstance(rows, list):

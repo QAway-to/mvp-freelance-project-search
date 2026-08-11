@@ -11,6 +11,7 @@ from utils.logger import log_agent_action
 from utils.llm import chat_completion
 from utils.content_library import ContentItem, library, parse_caption
 from utils.funnel_store import UserState, journal_premium, store
+from utils.offer import load_offer
 
 # Отдельный промпт для свободного чата в Telegram (меняй здесь)
 _CHAT_SYSTEM_PROMPT = """Ты — представитель Федерации Здоровья. Говоришь от лица Федерации, прямо и по делу. Отвечай ТОЛЬКО на основе базы знаний ниже.
@@ -169,11 +170,11 @@ _STARS_PRICE = 1000                        # 1000 Stars ≈ $20
 _REINDEX_MAX_SPAN = 200                    # сколько message_id за один /reindex
 _REINDEX_PAUSE = 0.3                       # пауза между пробами, чтобы не словить flood limit
 
-_CTA_TEXT = (
-    "\n\n———\n"
-    "<b>Хочешь глубже?</b> У нас есть полная база материалов, расширенные практики и персональные рекомендации.\n"
-    "Введи /buy — открой полный доступ за 1000 звёзд Telegram (~$20)."
-)
+_CTA_BUTTON = "🔗 Что входит и сколько стоит"
+
+# Карточка продукта, продающий блок и CTA — из prompts/*.txt. Пока там метки
+# <<...>>, оффер не показывается и ИИ не обсуждает покупку.
+_OFFER = load_offer(config.PURCHASE_URL)
 
 _PREMIUM_UNLOCKED_TEXT = (
     "Отлично! Доступ открыт. Теперь тебе доступны все материалы Федерации Здоровья.\n"
@@ -221,12 +222,15 @@ class TelegramBot:
                 .build()
             )
             self._app.add_handler(CommandHandler("start", self._handle_start))
-            self._app.add_handler(CommandHandler("buy", self._handle_buy))
-            self._app.add_handler(CommandHandler("testpay", self._handle_testpay))
             self._app.add_handler(CommandHandler("reindex", self._handle_reindex))
             self._app.add_handler(CommandHandler("migrate_legacy", self._handle_migrate_legacy))
-            self._app.add_handler(PreCheckoutQueryHandler(self._handle_precheckout))
-            self._app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, self._handle_payment_success))
+            if config.PAYMENTS_ENABLED:
+                self._app.add_handler(CommandHandler("buy", self._handle_buy))
+                self._app.add_handler(CommandHandler("testpay", self._handle_testpay))
+                self._app.add_handler(PreCheckoutQueryHandler(self._handle_precheckout))
+                self._app.add_handler(
+                    MessageHandler(filters.SUCCESSFUL_PAYMENT, self._handle_payment_success)
+                )
             self._app.add_handler(CallbackQueryHandler(self._handle_callback))
             # Посты в канале-библиотеке — до общего текстового хендлера,
             # иначе подпись поста уйдёт в LLM как вопрос пользователя.
@@ -239,6 +243,7 @@ class TelegramBot:
 
             await store.start()
             await library.load()
+            self._warn_about_unreachable_premium()
 
             await self._app.initialize()
             await self._app.start()
@@ -252,6 +257,20 @@ class TelegramBot:
             # сиротой и будет ходить в Sheets каждые 10с до конца жизни процесса.
             await store.stop()
             self._app = None
+
+    def _warn_about_unreachable_premium(self) -> None:
+        """С выключенной кассой is_premium ни у кого не станет True, поэтому
+        ролики с tier: premium не увидит никто и никогда — молча."""
+        if config.PAYMENTS_ENABLED:
+            return
+        locked = library.premium_count()
+        if locked:
+            log_agent_action(
+                "Content",
+                f"{locked} роликов помечены tier: premium, но оплата выключена — "
+                "их не увидит никто. Перемаркируйте посты в канале как free.",
+                level="WARNING",
+            )
 
     async def stop(self) -> None:
         if self._app:
@@ -320,6 +339,9 @@ class TelegramBot:
 
         elif data.startswith("send:"):
             await self._send_response(query, chat_id, int(data[5:]))
+
+        elif data == "offer":
+            await self._handle_offer_click(query, chat_id)
 
     async def _generate_cp(self, query, chat_id: str, idx: int, rewrite: bool = False) -> None:
         projects = self._projects.get(chat_id, [])
@@ -426,6 +448,11 @@ class TelegramBot:
             await query.message.reply_text(result_text, disable_web_page_preview=True)
         except TelegramError as e:
             log_agent_action("Telegram", f"Failed to send result: {e}", level="ERROR")
+
+    # --- Касса внутри бота: спит при PAYMENTS_ENABLED=false ------------------
+    # Четыре метода ниже не зарегистрированы как хендлеры, пока флаг опущен.
+    # Оставлены намеренно: продажа сейчас закрывается на внешней странице,
+    # но Stars может понадобиться снова — код рабочий и покрыт.
 
     async def _handle_buy(self, update: Update, context) -> None:
         if not update.message:
@@ -565,7 +592,8 @@ class TelegramBot:
         is_premium = state.is_premium
 
         if chat_id not in self._conversations:
-            self._conversations[chat_id] = [{"role": "system", "content": _CHAT_SYSTEM_PROMPT}]
+            system_prompt = _CHAT_SYSTEM_PROMPT + _OFFER.system_suffix()
+            self._conversations[chat_id] = [{"role": "system", "content": system_prompt}]
         else:
             # LRU: перекладываем в конец, чтобы вытеснялись самые давние чаты
             self._conversations[chat_id] = self._conversations.pop(chat_id)
@@ -597,15 +625,25 @@ class TelegramBot:
                 pass
             return
 
+        reply, price_blocked = _OFFER.sanitize_reply(reply)
+        if price_blocked:
+            log_agent_action(
+                "Telegram",
+                f"Ответ с ценой заблокирован (оффер не настроен), chat {chat_id}",
+                level="ERROR",
+            )
+            await store.event(chat_id, "price_talk_blocked", bucket=state.bucket)
+            await self._alert_admin(
+                "⚠️ Модель заговорила о цене при ненастроенном оффере.\n"
+                f"chat_id: <code>{chat_id}</code>\n"
+                "Ответ подменён. Заполни prompts/product.txt."
+            )
+
         conv.append({"role": "assistant", "content": reply})
         if len(conv) > _MAX_HISTORY + 1:
             self._conversations[chat_id] = [conv[0]] + conv[-_MAX_HISTORY:]
 
-        if not is_premium and state.messages >= _FUNNEL_CTA_AT:
-            reply += _CTA_TEXT
-            state = replace(state, cta_shown=state.cta_shown + 1)
-            await store.save(state)
-            await store.event(chat_id, "cta_shown", bucket=state.bucket, at_message=state.messages)
+        show_cta = _OFFER.is_ready and not is_premium and state.messages >= _FUNNEL_CTA_AT
 
         try:
             if thinking_msg:
@@ -627,6 +665,49 @@ class TelegramBot:
                 log_agent_action("Telegram", f"Failed to send reply: {e}", level="ERROR")
 
         log_agent_action("Telegram", f"Chat reply sent ({len(reply)} chars)")
+
+        if show_cta:
+            await self._send_offer_cta(update, state)
+
+    async def _send_offer_cta(self, update: Update, state: UserState) -> None:
+        """Оффер отдельным сообщением с кнопкой — так виден и показ, и клик."""
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton(_CTA_BUTTON, callback_data="offer")
+        ]])
+        try:
+            await update.message.reply_text(
+                _OFFER.cta_text, parse_mode="HTML", reply_markup=keyboard
+            )
+        except TelegramError as e:
+            log_agent_action("Telegram", f"Failed to send CTA: {e}", level="WARNING")
+            return
+
+        await store.save(replace(state, cta_shown=state.cta_shown + 1))
+        await store.event(
+            state.chat_id, "cta_shown", bucket=state.bucket, at_message=state.messages
+        )
+
+    async def _handle_offer_click(self, query, chat_id: str) -> None:
+        """Клик по офферу — единственная точка перед оплатой, которую бот видит."""
+        state = store.user(chat_id)
+        await store.event(chat_id, "offer_clicked", bucket=state.bucket, at_message=state.messages)
+
+        if not _OFFER.is_ready:
+            log_agent_action(
+                "Telegram", "Offer clicked but not configured: " + "; ".join(_OFFER.blockers), level="ERROR"
+            )
+            await query.message.reply_text("Подробности скоро — напиши мне, всё расскажу.")
+            return
+
+        separator = "&" if "?" in _OFFER.purchase_url else "?"
+        url = f"{_OFFER.purchase_url}{separator}uid={chat_id}"
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Перейти к оплате", url=url)]])
+        try:
+            await query.message.reply_text(
+                "Вот страница с условиями и оплатой:", reply_markup=keyboard
+            )
+        except TelegramError as e:
+            log_agent_action("Telegram", f"Failed to send purchase link: {e}", level="ERROR")
 
     # ------------------------------------------------------------------
     # Библиотека роликов (приватный канал)
