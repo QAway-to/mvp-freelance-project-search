@@ -222,6 +222,7 @@ class TelegramBot:
                 .build()
             )
             self._app.add_handler(CommandHandler("start", self._handle_start))
+            self._app.add_handler(CommandHandler("status", self._handle_status))
             self._app.add_handler(CommandHandler("reindex", self._handle_reindex))
             self._app.add_handler(CommandHandler("migrate_legacy", self._handle_migrate_legacy))
             if config.PAYMENTS_ENABLED:
@@ -773,11 +774,54 @@ class TelegramBot:
             f"Indexed post {item.message_id}: tags={','.join(item.tags) or '—'} tier={item.tier}",
         )
 
-    def _is_admin(self, update: Update) -> bool:
-        return (
-            bool(config.ADMIN_CHAT_ID)
-            and str(update.effective_chat.id) == str(config.ADMIN_CHAT_ID)
+    async def _deny_non_admin(self, update: Update, command: str) -> bool:
+        """True, если вызвавший не админ. Молчаливый отказ неотличим от
+        «команда не дошла», поэтому всегда отвечаем и логируем реальный id."""
+        chat_id = str(update.effective_chat.id)
+        if config.ADMIN_CHAT_ID and chat_id == str(config.ADMIN_CHAT_ID):
+            log_agent_action("Telegram", f"{command} запущена админом {chat_id}")
+            return False
+
+        log_agent_action(
+            "Telegram",
+            f"{command} отклонена: chat_id={chat_id}, "
+            f"ADMIN_CHAT_ID={config.ADMIN_CHAT_ID or 'не задан'}",
+            level="WARNING",
         )
+        try:
+            await update.message.reply_text(
+                "Команда только для администратора.\n"
+                f"Твой chat_id: <code>{chat_id}</code>\n"
+                "Если это ты — впиши его в ADMIN_CHAT_ID на Render.",
+                parse_mode="HTML",
+            )
+        except TelegramError:
+            pass
+        return True
+
+    async def _handle_status(self, update: Update, context) -> None:
+        """Что настроено, а что нет — видно прямо из бота."""
+        if not update.message or await self._deny_non_admin(update, "/status"):
+            return
+
+        def mark(ok: bool) -> str:
+            return "✅" if ok else "❌"
+
+        offer_line = (
+            f"{mark(_OFFER.is_ready)} оффер"
+            + (" (ДЕМО-данные)" if _OFFER.is_demo else "")
+            + ("" if _OFFER.is_ready else ": " + "; ".join(_OFFER.blockers))
+        )
+        lines = [
+            "<b>Состояние бота</b>",
+            f"{mark(bool(config.CONTENT_CHANNEL_ID))} канал с роликами",
+            f"{mark(len(library) > 0)} роликов в индексе: {len(library)}",
+            offer_line,
+            f"{mark(True)} оффер после сообщений: {_FUNNEL_CTA_AT}",
+            f"{'💳' if config.PAYMENTS_ENABLED else '➖'} касса в боте: "
+            + ("включена" if config.PAYMENTS_ENABLED else "выключена"),
+        ]
+        await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
     async def _handle_reindex(self, update: Update, context) -> None:
         """/reindex <from_id> <to_id> — пересобрать индекс по постам канала.
@@ -786,7 +830,7 @@ class TelegramBot:
         пересылается сюда (единственный способ увидеть подпись) и сразу
         удаляется.
         """
-        if not update.message or not self._is_admin(update):
+        if not update.message or await self._deny_non_admin(update, "/reindex"):
             return
         if not config.CONTENT_CHANNEL_ID:
             await update.message.reply_text("CONTENT_CHANNEL_ID не задан.")
@@ -828,13 +872,14 @@ class TelegramBot:
 
     async def _handle_migrate_legacy(self, update: Update, context) -> None:
         """Перелить ролики из старых file_id в канал — без перезаливки файлов."""
-        if not update.message or not self._is_admin(update):
+        if not update.message or await self._deny_non_admin(update, "/migrate_legacy"):
             return
         if not config.CONTENT_CHANNEL_ID:
             await update.message.reply_text("CONTENT_CHANNEL_ID не задан.")
             return
 
         moved = 0
+        errors: list[str] = []
         for tag, file_id in _LEGACY_VIDEOS.items():
             try:
                 await self._app.bot.send_video(
@@ -844,13 +889,19 @@ class TelegramBot:
                 )
                 moved += 1
             except TelegramError as e:
-                log_agent_action("Telegram", f"Legacy migration failed for {tag}: {e}", level="WARNING")
+                errors.append(f"{tag}: {e}")
+                log_agent_action("Telegram", f"Legacy migration failed for {tag}: {e}", level="ERROR")
             await asyncio.sleep(_REINDEX_PAUSE)
 
-        await update.message.reply_text(
-            f"✅ Перенесено в канал: {moved} из {len(_LEGACY_VIDEOS)}.\n"
-            "Посты проиндексируются автоматически как обычные публикации."
+        log_agent_action(
+            "Telegram", f"/migrate_legacy: перенесено {moved} из {len(_LEGACY_VIDEOS)}"
         )
+        report = f"Перенесено в канал: {moved} из {len(_LEGACY_VIDEOS)}."
+        if errors:
+            report += "\n\nОшибки:\n" + "\n".join(errors[:5])
+        else:
+            report += "\nПосты проиндексируются автоматически как обычные публикации."
+        await update.message.reply_text(report)
 
     async def send_notification(self, text: str) -> None:
         if not self._app or not config.TELEGRAM_CHANNEL_ID:
