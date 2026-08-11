@@ -117,3 +117,24 @@ def test_match_hides_premium_content_from_free_user(filled_library):
 
 def test_match_skips_already_seen(filled_library):
     assert filled_library.match("про воду", is_premium=False, exclude=[3]) is None
+
+
+# --- подбор без тегов -----------------------------------------------------
+
+def test_match_uses_title_when_post_has_no_tags():
+    """Посты в канал кладут без #тегов — иначе такой ролик не найдётся никогда."""
+    lib = ContentLibrary()
+    lib._items = {1: ContentItem(1, (), TIER_FREE, "Бег по снегу босиком")}
+
+    assert lib.match("расскажи про снег", is_premium=False) is not None
+
+
+def test_untagged_lists_only_unreachable_items():
+    lib = ContentLibrary()
+    lib._items = {
+        1: ContentItem(1, ("снег",), TIER_FREE, ""),
+        2: ContentItem(2, (), TIER_FREE, "Бег по снегу"),
+        3: ContentItem(3, (), TIER_FREE, ""),
+    }
+
+    assert [i.message_id for i in lib.untagged()] == [3]

@@ -852,6 +852,26 @@ class TelegramBot:
             await asyncio.sleep(_REINDEX_PAUSE)
         return found
 
+    def _report_library(self) -> None:
+        """Показать, по каким темам ролики реально подберутся.
+
+        Ролик без тегов и без узнаваемого названия молча не подберётся никогда —
+        это надо видеть, а не гадать.
+        """
+        for item in sorted(library._items.values(), key=lambda i: i.message_id):
+            topics = ", ".join(sorted(library.topics_of(item))) or "НЕТ ТЕМ"
+            log_agent_action(
+                "Content", f"  #{item.message_id}: [{topics}] {item.title[:60] or '(без подписи)'}"
+            )
+        blind = library.untagged()
+        if blind:
+            log_agent_action(
+                "Content",
+                f"{len(blind)} роликов не подберутся ни по одному запросу. "
+                "Допишите в подпись поста теги, например: #закаливание #снег",
+                level="WARNING",
+            )
+
     async def _await_channel_access(self) -> bool:
         """Дождаться, пока бота добавят в канал.
 
@@ -909,6 +929,7 @@ class TelegramBot:
             if found:
                 await library.upsert_many(found)
                 log_agent_action("Content", f"Авто-индексация: найдено роликов {len(found)}")
+                self._report_library()
                 return
 
             log_agent_action("Content", "В канале роликов нет — переношу легаси")

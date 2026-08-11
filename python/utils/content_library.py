@@ -173,10 +173,23 @@ class ContentLibrary:
                 continue
             if item.tier == TIER_PREMIUM and not is_premium:
                 continue
-            score = len(wanted.intersection(item.tags))
+            score = len(wanted.intersection(self.topics_of(item)))
             if score > best_score:
                 best, best_score = item, score
         return best
+
+    @staticmethod
+    def topics_of(item: ContentItem) -> set[str]:
+        """Темы ролика: явные теги плюс то, что читается из названия.
+
+        Посты в канал часто кладут без #тегов, и без этого такой ролик не
+        подобрался бы никогда.
+        """
+        return set(item.tags) | set(tags_for_text(item.title))
+
+    def untagged(self) -> list[ContentItem]:
+        """Ролики, которые не подберутся ни по одному запросу."""
+        return [item for item in self._items.values() if not self.topics_of(item)]
 
 
 library = ContentLibrary()
