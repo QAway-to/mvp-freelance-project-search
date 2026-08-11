@@ -170,6 +170,8 @@ _STARS_PRICE = 1000                        # 1000 Stars ≈ $20
 _REINDEX_MAX_SPAN = 200                    # сколько message_id за один /reindex
 _REINDEX_PAUSE = 0.3                       # пауза между пробами, чтобы не словить flood limit
 _BOOTSTRAP_SCAN = 60                       # сколько message_id пробуем при авто-старте
+_BOOTSTRAP_RETRY = 60                      # пауза между попытками достучаться до канала
+_BOOTSTRAP_MAX_WAIT = 1800                 # сколько всего ждём, пока бота добавят
 
 _CTA_BUTTON = "🔗 Что входит и сколько стоит"
 
@@ -838,6 +840,42 @@ class TelegramBot:
             await asyncio.sleep(_REINDEX_PAUSE)
         return found
 
+    async def _await_channel_access(self) -> bool:
+        """Дождаться, пока бота добавят в канал.
+
+        Проверка только на старте бесполезна: бота добавляют руками и уже после
+        того, как сервис поднялся. Поэтому пробуем повторно — тогда ролики
+        появятся сами, без перезапуска.
+        """
+        waited = 0
+        complained = False
+        while True:
+            try:
+                chat = await self._app.bot.get_chat(config.CONTENT_CHANNEL_ID)
+                log_agent_action("Content", f"Канал доступен: {chat.title or chat.id}")
+                return True
+            except TelegramError as e:
+                if not complained:
+                    log_agent_action(
+                        "Content",
+                        f"НЕТ ДОСТУПА К КАНАЛУ {config.CONTENT_CHANNEL_ID} ({e}). "
+                        "Добавьте бота администратором в канал — проверяю раз в минуту, "
+                        "перезапуск не нужен. Если бот уже добавлен, сверьте ID: "
+                        "он должен начинаться с -100 и принадлежать каналу.",
+                        level="ERROR",
+                    )
+                    complained = True
+                if waited >= _BOOTSTRAP_MAX_WAIT:
+                    log_agent_action(
+                        "Content",
+                        f"Канал так и не открылся за {_BOOTSTRAP_MAX_WAIT // 60} минут — "
+                        "перестаю проверять до следующего запуска",
+                        level="ERROR",
+                    )
+                    return False
+                await asyncio.sleep(_BOOTSTRAP_RETRY)
+                waited += _BOOTSTRAP_RETRY
+
     async def _bootstrap_content(self) -> None:
         """Наполнить библиотеку без участия человека.
 
@@ -850,19 +888,7 @@ class TelegramBot:
         if len(library):
             return
 
-        # "Chat not found" в каждой строчке ниже читается как загадка, поэтому
-        # сначала проверяем доступ к каналу и говорим прямо, что не так.
-        try:
-            chat = await self._app.bot.get_chat(config.CONTENT_CHANNEL_ID)
-            log_agent_action("Content", f"Канал доступен: {chat.title or chat.id}")
-        except TelegramError as e:
-            log_agent_action(
-                "Content",
-                f"НЕТ ДОСТУПА К КАНАЛУ {config.CONTENT_CHANNEL_ID} ({e}). "
-                "Добавьте бота администратором в канал — без этого роликов не будет. "
-                "Если бот уже добавлен, проверьте, что ID начинается с -100 и принадлежит каналу.",
-                level="ERROR",
-            )
+        if not await self._await_channel_access():
             return
 
         probe_chat = str(config.ADMIN_CHAT_ID or config.CONTENT_CHANNEL_ID)
