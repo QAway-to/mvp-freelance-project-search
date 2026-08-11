@@ -44,15 +44,25 @@ def looks_like_price_talk(text: str) -> bool:
     return bool(_PRICE_RE.search(text))
 
 
-def _read(name: str) -> str:
-    """Прочитать файл промпта, выбросив строки-комментарии."""
+DEMO_MARKER = "# DEMO"
+
+
+def _read_raw(name: str) -> str:
     try:
-        raw = (_PROMPTS_DIR / name).read_text(encoding="utf-8")
+        return (_PROMPTS_DIR / name).read_text(encoding="utf-8")
     except OSError as e:
         log_agent_action("Offer", f"Не прочитан {name}: {e}", level="WARNING")
         return ""
+
+
+def _strip_comments(raw: str) -> str:
     lines = [line for line in raw.splitlines() if not line.lstrip().startswith("#")]
     return "\n".join(lines).strip()
+
+
+def _read(name: str) -> str:
+    """Прочитать файл промпта, выбросив строки-комментарии."""
+    return _strip_comments(_read_raw(name))
 
 
 @dataclass(frozen=True)
@@ -62,6 +72,7 @@ class Offer:
     cta_text: str
     purchase_url: str
     blockers: tuple[str, ...]
+    is_demo: bool = False
 
     @property
     def is_ready(self) -> bool:
@@ -85,9 +96,11 @@ class Offer:
 
 
 def load_offer(purchase_url: str | None) -> Offer:
-    product = _read("product.txt")
+    product_raw = _read_raw("product.txt")
+    product = _strip_comments(product_raw)
     sales = _read("sales_block.txt")
     cta = _read("offer_cta.txt")
+    is_demo = DEMO_MARKER in product_raw
 
     blockers: list[str] = []
     if not product:
@@ -107,9 +120,17 @@ def load_offer(purchase_url: str | None) -> Offer:
         cta_text=cta or "Хочешь разобрать это системно?",
         purchase_url=purchase_url or "",
         blockers=tuple(blockers),
+        is_demo=is_demo,
     )
 
-    if offer.is_ready:
+    if offer.is_ready and offer.is_demo:
+        log_agent_action(
+            "Offer",
+            "⚠️ В prompts/product.txt ДЕМО-данные: бот называет вымышленные цену и "
+            "состав. Заменить до живого трафика (убрать строку '# DEMO').",
+            level="WARNING",
+        )
+    elif offer.is_ready:
         log_agent_action("Offer", "Оффер настроен — продающий блок включён")
     else:
         log_agent_action(

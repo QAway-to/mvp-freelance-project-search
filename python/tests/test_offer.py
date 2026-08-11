@@ -107,6 +107,22 @@ def test_configured_offer_may_talk_about_price(prompts):
     assert blocked is False and "4900" in safe
 
 
+def test_demo_marker_is_detected_but_does_not_block(prompts):
+    """Демо-данные оффер не блокируют — иначе не показать воронку заказчику."""
+    (prompts / "product.txt").write_text("# DEMO\nЦЕНА: 4900 руб.", encoding="utf-8")
+
+    result = load_offer("https://pay.example/x")
+
+    assert result.is_demo is True
+    assert result.is_ready is True
+
+
+def test_real_product_card_is_not_marked_demo(prompts):
+    (prompts / "product.txt").write_text("ЦЕНА: 4900 руб.", encoding="utf-8")
+
+    assert load_offer("https://pay.example/x").is_demo is False
+
+
 def test_comment_lines_do_not_leak_into_prompt(prompts):
     (prompts / "product.txt").write_text(
         "# служебный комментарий\nНАЗВАНИЕ: Курс\nЦЕНА: 4900 руб.", encoding="utf-8"
