@@ -244,20 +244,18 @@ class TelegramBot:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message)
             )
 
-            await store.start()
-            await library.load()
             self._warn_about_config_gaps()
-            self._warn_about_unreachable_premium()
 
             await self._app.initialize()
             await self._app.start()
             # drop_pending_updates=False: посты в канал, сделанные пока сервис
             # спал, иначе потерялись бы вместе с индексом.
             await self._app.updater.start_polling(drop_pending_updates=False)
-            log_agent_action("Telegram", f"Bot started (polling), {len(library)} videos indexed")
-            # Фоном: перебор постов канала занимает десятки секунд, а бот
-            # должен отвечать сразу.
-            asyncio.create_task(self._bootstrap_content())
+            log_agent_action("Telegram", "Bot started (polling)")
+            # Всё, что ходит в сеть, уезжает в фон. Раньше загрузка из Sheets
+            # висела на пути запуска: порт открывается только после неё, и
+            # медленный ответ Google валил весь деплой (Exited with status 3).
+            asyncio.create_task(self._warmup())
         except Exception as e:
             log_agent_action("Telegram", f"Bot startup failed: {e} — running without Telegram", level="WARNING")
             # store.start() мог уже поднять фоновый флашер — иначе он останется
@@ -851,6 +849,19 @@ class TelegramBot:
                 pass
             await asyncio.sleep(_REINDEX_PAUSE)
         return found
+
+    async def _warmup(self) -> None:
+        """Подтянуть состояние и контент уже после того, как бот отвечает."""
+        try:
+            await store.start()
+            await library.load()
+            self._warn_about_unreachable_premium()
+            log_agent_action("Content", f"Библиотека при старте: {len(library)} роликов")
+            await self._bootstrap_content()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log_agent_action("Telegram", f"Warmup failed: {e} — бот продолжает работать", level="ERROR")
 
     def _report_library(self) -> None:
         """Показать, по каким темам ролики реально подберутся.

@@ -164,7 +164,9 @@ class SheetsStore:
                     if not isinstance(row, dict):
                         continue
                     state = UserState.from_row(row)
-                    if state:
+                    # Загрузка идёт фоном, пока бот уже отвечает: то, что успели
+                    # накопить в памяти, свежее прочитанного из таблицы.
+                    if state and state.chat_id not in self._users:
                         self._users[state.chat_id] = state
                 self._loaded = True
                 log_agent_action("Funnel", f"Loaded {len(self._users)} users from Sheets")
