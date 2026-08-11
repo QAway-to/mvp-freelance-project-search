@@ -243,6 +243,7 @@ class TelegramBot:
 
             await store.start()
             await library.load()
+            self._warn_about_config_gaps()
             self._warn_about_unreachable_premium()
 
             await self._app.initialize()
@@ -257,6 +258,24 @@ class TelegramBot:
             # сиротой и будет ходить в Sheets каждые 10с до конца жизни процесса.
             await store.stop()
             self._app = None
+
+    def _warn_about_config_gaps(self) -> None:
+        """Молчаливая недонастройка дороже шумного лога: без CONTENT_CHANNEL_ID
+        бот не отдаст ни одного ролика и никак об этом не сообщит."""
+        if not config.CONTENT_CHANNEL_ID:
+            log_agent_action(
+                "Content",
+                "CONTENT_CHANNEL_ID не задан — ролики отключены полностью, "
+                "бот будет отвечать только текстом",
+                level="ERROR",
+            )
+        if not config.ADMIN_CHAT_ID:
+            log_agent_action(
+                "Telegram",
+                "ADMIN_CHAT_ID не задан — /reindex и /migrate_legacy недоступны, "
+                "алерты о сбоях никуда не уйдут",
+                level="WARNING",
+            )
 
     def _warn_about_unreachable_premium(self) -> None:
         """С выключенной кассой is_premium ни у кого не станет True, поэтому
