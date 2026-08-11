@@ -125,6 +125,26 @@ def test_real_product_card_is_not_marked_demo(prompts):
     assert load_offer("https://pay.example/x").is_demo is False
 
 
+def test_invoice_title_is_cut_by_word_not_mid_word(prompts):
+    (prompts / "product.txt").write_text(
+        "НАЗВАНИЕ: Вход в бег босиком — базовый курс Федерации\nЦЕНА: 4900 руб.",
+        encoding="utf-8",
+    )
+
+    title = load_offer("https://pay.example/x").product_name
+
+    full = "Вход в бег босиком — базовый курс Федерации"
+    assert len(title) <= 32
+    assert full.startswith(title)          # это начало настоящего названия
+    assert full[len(title)] == " "         # и обрыв пришёлся на границу слова
+
+
+def test_invoice_title_falls_back_without_name(prompts):
+    (prompts / "product.txt").write_text("ЦЕНА: 4900 руб.", encoding="utf-8")
+
+    assert load_offer("https://pay.example/x").product_name == "Доступ к материалам"
+
+
 def test_comment_lines_do_not_leak_into_prompt(prompts):
     (prompts / "product.txt").write_text(
         "# служебный комментарий\nНАЗВАНИЕ: Курс\nЦЕНА: 4900 руб.", encoding="utf-8"

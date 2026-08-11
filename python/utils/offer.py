@@ -45,6 +45,7 @@ def looks_like_price_talk(text: str) -> bool:
 
 
 DEMO_MARKER = "# DEMO"
+_INVOICE_TITLE_MAX = 32  # лимит Telegram на заголовок счёта
 
 
 def _read_raw(name: str) -> str:
@@ -77,6 +78,21 @@ class Offer:
     @property
     def is_ready(self) -> bool:
         return not self.blockers
+
+    @property
+    def product_name(self) -> str:
+        """Название из карточки — заголовок счёта в Telegram."""
+        for line in self.product_card.splitlines():
+            if line.upper().startswith("НАЗВАНИЕ:"):
+                name = line.split(":", 1)[1].strip()
+                if not name:
+                    break
+                if len(name) <= _INVOICE_TITLE_MAX:
+                    return name
+                # Лимит Telegram — 32 символа; режем по слову, а не посередине
+                cut = name[:_INVOICE_TITLE_MAX].rsplit(" ", 1)[0].rstrip(" —-,")
+                return cut or name[:_INVOICE_TITLE_MAX]
+        return "Доступ к материалам"
 
     def sanitize_reply(self, reply: str) -> tuple[str, bool]:
         """Не дать ненастроенному боту назвать цену.

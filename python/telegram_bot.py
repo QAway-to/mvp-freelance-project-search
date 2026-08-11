@@ -30,9 +30,8 @@ _CHAT_SYSTEM_PROMPT = """Ты — представитель Федерации 
 — Вопрос должен предлагать выбор между двумя конкретными темами из нашей базы, которые ещё не обсуждались. Формат: "Что разберём дальше — <b>тема А</b> или <b>тема Б</b>?"
 — Темы для выбора: бег по росе, бег по снегу, бег по камешкам, бег по песку, бег в воде, техника дыхания, виды бега (перекат/подушки/пальцы), закаливание, самомассаж через ступни, бег в дождь, как начать бегать, выбор кроссовок, бег для долголетия, бег перед закалкой
 — Не повторяй темы вопросов которые уже звучали в диалоге
-— Примерно в каждом третьем ответе (естественно и к месту) упомяни одну из соцсетей:
-  TikTok: https://www.tiktok.com/@federaciya_zdoroviya
-  Telegram-канал: https://t.me/+u9rdrsCuJfhlYmI6
+— Примерно в каждом третьем ответе (естественно и к месту) упомяни TikTok: https://www.tiktok.com/@federaciya_zdoroviya
+— Никаких других ссылок не давай. Ссылку на Telegram-канал не упоминай вообще, даже если о ней спросят
 
 БАЗА ЗНАНИЙ:
 
@@ -166,7 +165,7 @@ _MAX_CONVERSATIONS = 500   # сколько чатов держим в памя�
 # Состояние пользователей живёт в utils/funnel_store (Sheets + кеш в памяти),
 # ролики — в приватном канале (utils/content_library).
 _FUNNEL_CTA_AT = config.FUNNEL_CTA_AT      # после скольких сообщений показывать оффер
-_STARS_PRICE = 1000                        # 1000 Stars ≈ $20
+_STARS_PRICE = config.STARS_PRICE          # цена в звёздах, задаётся через env
 _REINDEX_MAX_SPAN = 200                    # сколько message_id за один /reindex
 _REINDEX_PAUSE = 0.3                       # пауза между пробами, чтобы не словить flood limit
 _BOOTSTRAP_SCAN = 60                       # сколько message_id пробуем при авто-старте
@@ -480,19 +479,28 @@ class TelegramBot:
     # Оставлены намеренно: продажа сейчас закрывается на внешней странице,
     # но Stars может понадобиться снова — код рабочий и покрыт.
 
+    async def _send_invoice(self, message) -> bool:
+        """Счёт в Telegram Stars. Оплата не выходит из чата — ни лендинга, ни карты."""
+        try:
+            await message.reply_invoice(
+                title=_OFFER.product_name,
+                description=(
+                    "Полный доступ к программе. Оплата проходит внутри Telegram, "
+                    "карта не нужна."
+                ),
+                payload="premium_access",
+                currency="XTR",
+                prices=[LabeledPrice(label=_OFFER.product_name, amount=_STARS_PRICE)],
+            )
+            return True
+        except TelegramError as e:
+            log_agent_action("Telegram", f"Failed to send invoice: {e}", level="ERROR")
+            return False
+
     async def _handle_buy(self, update: Update, context) -> None:
         if not update.message:
             return
-        try:
-            await update.message.reply_invoice(
-                title="Доступ к материалам Федерации Здоровья",
-                description="Полный доступ: расширенные практики, видеоматериалы и персональные рекомендации по бегу и долголетию.",
-                payload="premium_access",
-                currency="XTR",
-                prices=[LabeledPrice(label="Полный доступ", amount=_STARS_PRICE)],
-            )
-        except TelegramError as e:
-            log_agent_action("Telegram", f"Failed to send invoice: {e}", level="ERROR")
+        await self._send_invoice(update.message)
 
     async def _handle_testpay(self, update: Update, context) -> None:
         """MVP: открывает доступ без реальной оплаты для тестирования."""
@@ -588,9 +596,7 @@ class TelegramBot:
         welcome = (
             "Приветствую! На связи Богдан, глава Федерации Здоровья.\n\n"
             "Здесь мы говорим о беге, здоровье и практиках, которые реально работают — проверено на себе и тысячах людей.\n\n"
-            "Наши соцсети:\n"
-            "TikTok: https://www.tiktok.com/@federaciya_zdoroviya\n"
-            "Telegram-канал: https://t.me/+u9rdrsCuJfhlYmI6\n\n"
+            "Наш TikTok: https://www.tiktok.com/@federaciya_zdoroviya\n\n"
             "С чего начнём?\n\n"
             "<b>Бег босиком и его польза</b>\n"
             "<b>Виды бега и техника</b>\n"
@@ -723,6 +729,12 @@ class TelegramBot:
                 "Telegram", "Offer clicked but not configured: " + "; ".join(_OFFER.blockers), level="ERROR"
             )
             await query.message.reply_text("Подробности скоро — напиши мне, всё расскажу.")
+            return
+
+        # Касса внутри Telegram — счёт приходит прямо в чат, без внешней страницы.
+        if config.PAYMENTS_ENABLED:
+            if await self._send_invoice(query.message):
+                await store.event(chat_id, "invoice_sent", bucket=state.bucket)
             return
 
         if not _OFFER.purchase_url:

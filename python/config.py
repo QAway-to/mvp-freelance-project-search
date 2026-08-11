@@ -61,6 +61,8 @@ class Config:
     PURCHASE_URL: Optional[str] = os.getenv('PURCHASE_URL')
     # После скольких сообщений показывать оффер. На демо удобно 2.
     FUNNEL_CTA_AT: int = int(os.getenv('FUNNEL_CTA_AT', '5'))
+    # Цена в Telegram Stars (XTR). 1 звезда ≈ $0.02, то есть 2500 ≈ $50.
+    STARS_PRICE: int = int(os.getenv('STARS_PRICE', '1000'))
 
 
     # n8n Integration
