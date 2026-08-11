@@ -165,7 +165,7 @@ _MAX_CONVERSATIONS = 500   # сколько чатов держим в памя�
 # Воронка — платный доступ через Telegram Stars.
 # Состояние пользователей живёт в utils/funnel_store (Sheets + кеш в памяти),
 # ролики — в приватном канале (utils/content_library).
-_FUNNEL_CTA_AT = 5                         # после скольких сообщений показывать оффер
+_FUNNEL_CTA_AT = config.FUNNEL_CTA_AT      # после скольких сообщений показывать оффер
 _STARS_PRICE = 1000                        # 1000 Stars ≈ $20
 _REINDEX_MAX_SPAN = 200                    # сколько message_id за один /reindex
 _REINDEX_PAUSE = 0.3                       # пауза между пробами, чтобы не словить flood limit

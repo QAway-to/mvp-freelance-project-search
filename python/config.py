@@ -59,6 +59,8 @@ class Config:
     # Внешняя страница оплаты. К ней добавляется ?uid=<chat_id>, чтобы платёж
     # можно было связать с диалогом.
     PURCHASE_URL: Optional[str] = os.getenv('PURCHASE_URL')
+    # После скольких сообщений показывать оффер. На демо удобно 2.
+    FUNNEL_CTA_AT: int = int(os.getenv('FUNNEL_CTA_AT', '5'))
 
 
     # n8n Integration

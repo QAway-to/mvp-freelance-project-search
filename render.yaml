@@ -34,6 +34,12 @@ services:
         sync: false
       - key: ADMIN_CHAT_ID
         sync: false
+      - key: PURCHASE_URL
+        sync: false
+      - key: FUNNEL_CTA_AT
+        sync: false
+      - key: PAYMENTS_ENABLED
+        sync: false
       - key: WEBHOOK_PASSWORD
         sync: false
       - key: SHEETS_SCRIPT_URL
