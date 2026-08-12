@@ -163,3 +163,8 @@ def test_everyday_phrases_hit_a_topic(phrase, expected):
 @pytest.mark.parametrize("phrase", ["привет", "сколько это стоит", "спасибо"])
 def test_offtopic_phrases_stay_empty(phrase):
     assert tags_for_text(phrase) == ()
+
+
+def test_topic_words_match_only_at_word_start():
+    """«море» сидит внутри «терморегуляции» — подстрочный поиск тянул пляж."""
+    assert tags_for_text("Закаливание запускает терморегуляцию") == ("закаливание",)

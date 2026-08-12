@@ -111,14 +111,21 @@ def parse_caption(caption: str | None, message_id: int) -> ContentItem:
     )
 
 
+# Слова ищем с начала слова, а не подстрокой: «море» сидит внутри
+# «терМОРЕгуляции», и без границы любое упоминание терморегуляции тянуло ролик
+# про пляж.
+_TAG_MATCHERS: dict[str, re.Pattern[str]] = {
+    tag: re.compile(
+        r"\b(?:" + "|".join(re.escape(n) for n in (tag, *needles)) + r")",
+        re.IGNORECASE | re.UNICODE,
+    )
+    for tag, needles in _TAG_SYNONYMS.items()
+}
+
+
 def tags_for_text(text: str) -> tuple[str, ...]:
     """Which canonical tags a user message is asking about."""
-    lowered = text.lower()
-    return tuple(
-        tag
-        for tag, needles in _TAG_SYNONYMS.items()
-        if tag in lowered or any(needle in lowered for needle in needles)
-    )
+    return tuple(tag for tag, matcher in _TAG_MATCHERS.items() if matcher.search(text))
 
 
 class ContentLibrary:

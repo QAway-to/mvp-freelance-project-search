@@ -764,6 +764,19 @@ class TelegramBot:
     # Библиотека роликов (приватный канал)
     # ------------------------------------------------------------------
 
+    def _topic_query(self, chat_id: str, text: str) -> str:
+        """Текст, по которому ищем ролик.
+
+        В живом диалоге половина реплик — продолжения: «ещё», «а подробнее»,
+        «давай». Темы в них нет, она осталась в предыдущих сообщениях, поэтому
+        при пустом сообщении ищем по нескольким последним репликам.
+        """
+        if tags_for_text(text):
+            return text
+        conv = self._conversations.get(chat_id, [])
+        recent = [m["content"] for m in conv[-4:] if m.get("role") != "system"]
+        return "\n".join([*recent, text])
+
     def _ensure_library(self) -> None:
         """Собрать библиотеку по живому трафику, если прогрев её не наполнил.
 
@@ -792,11 +805,12 @@ class TelegramBot:
 
         self._ensure_library()
 
-        item = library.match(text, is_premium=state.is_premium, exclude=state.seen_content)
+        query = self._topic_query(state.chat_id, text)
+        item = library.match(query, is_premium=state.is_premium, exclude=state.seen_content)
         if not item:
             # Без этой строки «не нашёл» и «не отправил» выглядят одинаково —
             # то есть никак.
-            wanted = ", ".join(tags_for_text(text)) or "тем не распознано"
+            wanted = ", ".join(tags_for_text(query)) or "тем не распознано"
             log_agent_action(
                 "Content",
                 f"Ролик не подобран (в запросе: {wanted}; в библиотеке: {len(library)}) "
