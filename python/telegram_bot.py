@@ -799,7 +799,8 @@ class TelegramBot:
             wanted = ", ".join(tags_for_text(text)) or "тем не распознано"
             log_agent_action(
                 "Content",
-                f"Ролик не подобран (в запросе: {wanted}; в библиотеке: {len(library)})",
+                f"Ролик не подобран (в запросе: {wanted}; в библиотеке: {len(library)}) "
+                f"— вопрос: «{text[:60]}»",
             )
             return
 

@@ -138,3 +138,28 @@ def test_untagged_lists_only_unreachable_items():
     }
 
     assert [i.message_id for i in lib.untagged()] == [3]
+
+
+# --- распознавание тем в живых фразах -------------------------------------
+
+@pytest.mark.parametrize(
+    "phrase,expected",
+    [
+        ("а если холодно на улице?", "закаливание"),
+        ("как бегать зимой", "снег"),
+        ("можно ли бегать по песку", "пляж"),
+        ("бегать у моря", "вода"),
+        ("у меня болит колено", "травмы"),
+        ("с чего начать бегать", "начало"),
+        ("как правильно дышать", "дыхание"),
+        ("в каких кроссовках бегать", "обувь"),
+    ],
+)
+def test_everyday_phrases_hit_a_topic(phrase, expected):
+    """Словарь должен ловить обычную речь, а не только слово-тег."""
+    assert expected in tags_for_text(phrase)
+
+
+@pytest.mark.parametrize("phrase", ["привет", "сколько это стоит", "спасибо"])
+def test_offtopic_phrases_stay_empty(phrase):
+    assert tags_for_text(phrase) == ()
