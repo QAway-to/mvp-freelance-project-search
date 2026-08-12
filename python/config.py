@@ -63,6 +63,12 @@ class Config:
     FUNNEL_CTA_AT: int = int(os.getenv('FUNNEL_CTA_AT', '5'))
     # Цена в Telegram Stars (XTR). 1 звезда ≈ $0.02, то есть 2500 ≈ $50.
     STARS_PRICE: int = int(os.getenv('STARS_PRICE', '1000'))
+    # Публичный адрес сервиса. На Render подставляется автоматически.
+    # Если задан — бот работает через webhook, а не поллинг: спящий контейнер
+    # будит сам входящий запрос Telegram, поэтому сообщения не теряются.
+    PUBLIC_URL: Optional[str] = os.getenv('PUBLIC_URL') or os.getenv('RENDER_EXTERNAL_URL')
+    # Секрет вебхука. Telegram присылает его в заголовке, чужие POST отсекаем.
+    TELEGRAM_WEBHOOK_SECRET: str = os.getenv('TELEGRAM_WEBHOOK_SECRET', '')
 
 
     # n8n Integration

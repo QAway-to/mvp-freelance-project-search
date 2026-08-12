@@ -76,6 +76,24 @@ async def health_check():
     return {"status": "healthy", "service": "agent-a"}
 
 
+@app.post(telegram_bot.WEBHOOK_PATH)
+async def telegram_webhook(request: Request):
+    """Точка входа для Telegram.
+
+    Именно этот запрос будит спящий контейнер на free tier — поэтому бот
+    отвечает с задержкой на холодный старт, а не пропадает совсем. Отвечаем
+    200 сразу: Telegram ждёт ответа считанные секунды и при таймауте присылает
+    апдейт заново, а это дубли сообщений у человека.
+    """
+    accepted = await telegram_bot.handle_webhook(
+        await request.json(),
+        request.headers.get("X-Telegram-Bot-Api-Secret-Token"),
+    )
+    if not accepted:
+        raise HTTPException(status_code=403, detail="bad secret")
+    return {"ok": True}
+
+
 _SSE_KEEPALIVE_TIMEOUT = 15.0
 
 

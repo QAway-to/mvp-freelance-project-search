@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 from dataclasses import replace
 from typing import Any
 
@@ -202,6 +203,7 @@ class TelegramBot:
         self._warmup_task: "asyncio.Task | None" = None
         self._library_task: "asyncio.Task | None" = None
         self._bootstrap_running = False
+        self._update_tasks: set["asyncio.Task"] = set()
         # chat_id -> list of projects from last search
         self._projects: dict[str, list[dict[str, Any]]] = {}
         # chat_id -> conversation history for free chat
@@ -251,10 +253,13 @@ class TelegramBot:
 
             await self._app.initialize()
             await self._app.start()
-            # drop_pending_updates=False: посты в канал, сделанные пока сервис
-            # спал, иначе потерялись бы вместе с индексом.
-            await self._app.updater.start_polling(drop_pending_updates=False)
-            log_agent_action("Telegram", "Bot started (polling)")
+            if self.webhook_url:
+                await self._start_webhook()
+            else:
+                # drop_pending_updates=False: посты в канал, сделанные пока
+                # сервис спал, иначе потерялись бы вместе с индексом.
+                await self._app.updater.start_polling(drop_pending_updates=False)
+                log_agent_action("Telegram", "Bot started (polling)")
             # Всё, что ходит в сеть, уезжает в фон. Раньше загрузка из Sheets
             # висела на пути запуска: порт открывается только после неё, и
             # медленный ответ Google валил весь деплой (Exited with status 3).
@@ -303,9 +308,69 @@ class TelegramBot:
                 level="WARNING",
             )
 
+    # ------------------------------------------------------------------
+    # Webhook: Telegram стучится к нам сам
+    # ------------------------------------------------------------------
+
+    WEBHOOK_PATH = "/telegram/webhook"
+
+    @property
+    def webhook_url(self) -> str:
+        """Публичный адрес вебхука или пусто, если работаем поллингом."""
+        if not config.PUBLIC_URL:
+            return ""
+        return config.PUBLIC_URL.rstrip("/") + self.WEBHOOK_PATH
+
+    @property
+    def webhook_secret(self) -> str:
+        """Свой секрет, иначе производный от токена — чужие POST отсекаем всегда."""
+        if config.TELEGRAM_WEBHOOK_SECRET:
+            return config.TELEGRAM_WEBHOOK_SECRET
+        digest = hashlib.sha256((config.TELEGRAM_BOT_TOKEN or "").encode()).hexdigest()
+        return digest[:32]
+
+    async def _start_webhook(self) -> None:
+        """Поллинг требует, чтобы контейнер был жив; вебхук — наоборот, будит его.
+
+        На free tier сервис засыпает через 15 минут, и при поллинге бот
+        оказывается недоступен до первого чужого запроса. Здесь запрос делает
+        сам Telegram: приходит задержка на холодный старт, но не потеря.
+        """
+        await self._app.bot.set_webhook(
+            url=self.webhook_url,
+            secret_token=self.webhook_secret,
+            drop_pending_updates=False,
+            allowed_updates=["message", "callback_query", "channel_post", "pre_checkout_query"],
+        )
+        log_agent_action("Telegram", f"Bot started (webhook): {self.webhook_url}")
+
+    async def handle_webhook(self, data: dict, secret_header: str | None) -> bool:
+        """Принять апдейт от Telegram. Возвращает False, если секрет не сошёлся.
+
+        Обработка уходит в фон, а Telegram сразу получает 200: иначе он ждёт
+        ответа, упирается в таймаут и присылает тот же апдейт снова — человек
+        получил бы дубли.
+        """
+        if secret_header != self.webhook_secret:
+            log_agent_action("Telegram", "Webhook: неверный секрет, запрос отброшен", level="WARNING")
+            return False
+        if not self._app:
+            return True
+
+        update = Update.de_json(data, self._app.bot)
+        if update is None:
+            return True
+
+        task = asyncio.create_task(self._app.process_update(update))
+        # Ссылку держим: без неё GC вправе убить обработку на первом await.
+        self._update_tasks.add(task)
+        task.add_done_callback(self._update_tasks.discard)
+        return True
+
     async def stop(self) -> None:
         if self._app:
-            await self._app.updater.stop()
+            if not self.webhook_url:
+                await self._app.updater.stop()
             await self._app.stop()
             await self._app.shutdown()
             await store.stop()

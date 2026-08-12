@@ -40,6 +40,8 @@ services:
         sync: false
       - key: PAYMENTS_ENABLED
         sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
       - key: WEBHOOK_PASSWORD
         sync: false
       - key: SHEETS_SCRIPT_URL
