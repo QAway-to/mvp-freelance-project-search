@@ -199,6 +199,8 @@ _LEGACY_VIDEOS: dict[str, str] = {
 class TelegramBot:
     def __init__(self):
         self._app: Application | None = None
+        # Держим ссылку, иначе задачу может собрать GC (см. start()).
+        self._warmup_task: "asyncio.Task | None" = None
         # chat_id -> list of projects from last search
         self._projects: dict[str, list[dict[str, Any]]] = {}
         # chat_id -> conversation history for free chat
@@ -255,7 +257,12 @@ class TelegramBot:
             # Всё, что ходит в сеть, уезжает в фон. Раньше загрузка из Sheets
             # висела на пути запуска: порт открывается только после неё, и
             # медленный ответ Google валил весь деплой (Exited with status 3).
-            asyncio.create_task(self._warmup())
+            #
+            # Ссылку на задачу держим обязательно: event loop хранит только
+            # слабую ссылку, и без этого сборщик мусора вправе убить прогрев
+            # посреди сетевого вызова — молча, без единой строчки в логе.
+            self._warmup_task = asyncio.create_task(self._warmup())
+            self._warmup_task.add_done_callback(self._on_warmup_done)
         except Exception as e:
             log_agent_action("Telegram", f"Bot startup failed: {e} — running without Telegram", level="WARNING")
             # store.start() мог уже поднять фоновый флашер — иначе он останется
@@ -849,6 +856,17 @@ class TelegramBot:
                 pass
             await asyncio.sleep(_REINDEX_PAUSE)
         return found
+
+    def _on_warmup_done(self, task: "asyncio.Task") -> None:
+        """Молчаливо умерший прогрев — худший вариант: роликов нет, причин нет."""
+        if task.cancelled():
+            log_agent_action("Telegram", "Прогрев отменён", level="WARNING")
+            return
+        error = task.exception()
+        if error:
+            log_agent_action("Telegram", f"Прогрев упал: {error!r}", level="ERROR")
+        else:
+            log_agent_action("Telegram", "Прогрев завершён")
 
     async def _warmup(self) -> None:
         """Подтянуть состояние и контент уже после того, как бот отвечает."""
