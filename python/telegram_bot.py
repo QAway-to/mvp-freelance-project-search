@@ -9,7 +9,7 @@ from telegram.error import TelegramError
 from config import config
 from utils.logger import log_agent_action
 from utils.llm import chat_completion
-from utils.content_library import ContentItem, library, parse_caption
+from utils.content_library import ContentItem, library, parse_caption, tags_for_text
 from utils.funnel_store import UserState, journal_premium, store
 from utils.offer import load_offer
 
@@ -30,8 +30,7 @@ _CHAT_SYSTEM_PROMPT = """Ты — представитель Федерации 
 — Вопрос должен предлагать выбор между двумя конкретными темами из нашей базы, которые ещё не обсуждались. Формат: "Что разберём дальше — <b>тема А</b> или <b>тема Б</b>?"
 — Темы для выбора: бег по росе, бег по снегу, бег по камешкам, бег по песку, бег в воде, техника дыхания, виды бега (перекат/подушки/пальцы), закаливание, самомассаж через ступни, бег в дождь, как начать бегать, выбор кроссовок, бег для долголетия, бег перед закалкой
 — Не повторяй темы вопросов которые уже звучали в диалоге
-— Примерно в каждом третьем ответе (естественно и к месту) упомяни TikTok: https://www.tiktok.com/@federaciya_zdoroviya
-— Никаких других ссылок не давай. Ссылку на Telegram-канал не упоминай вообще, даже если о ней спросят
+— НИКОГДА не давай ссылок и не отправляй человека никуда: ни в TikTok, ни в Telegram-канал, ни на сайт. Разговор заканчивается здесь, в этом чате. Если спросят про соцсети — скажи, что всё нужное разберём прямо тут, и продолжи по теме
 
 БАЗА ЗНАНИЙ:
 
@@ -603,7 +602,6 @@ class TelegramBot:
         welcome = (
             "Приветствую! На связи Богдан, глава Федерации Здоровья.\n\n"
             "Здесь мы говорим о беге, здоровье и практиках, которые реально работают — проверено на себе и тысячах людей.\n\n"
-            "Наш TikTok: https://www.tiktok.com/@federaciya_zdoroviya\n\n"
             "С чего начнём?\n\n"
             "<b>Бег босиком и его польза</b>\n"
             "<b>Виды бега и техника</b>\n"
@@ -796,6 +794,13 @@ class TelegramBot:
 
         item = library.match(text, is_premium=state.is_premium, exclude=state.seen_content)
         if not item:
+            # Без этой строки «не нашёл» и «не отправил» выглядят одинаково —
+            # то есть никак.
+            wanted = ", ".join(tags_for_text(text)) or "тем не распознано"
+            log_agent_action(
+                "Content",
+                f"Ролик не подобран (в запросе: {wanted}; в библиотеке: {len(library)})",
+            )
             return
 
         try:
@@ -808,6 +813,10 @@ class TelegramBot:
             log_agent_action("Telegram", f"Failed to send video {item.message_id}: {e}", level="WARNING")
             return
 
+        log_agent_action(
+            "Content",
+            f"Ролик #{item.message_id} [{', '.join(library.topics_of(item))}] отправлен в чат {state.chat_id}",
+        )
         await store.save(replace(state, seen_content=state.seen_content + (item.message_id,)))
         await store.event(
             state.chat_id, "video_sent", message_id=item.message_id, title=item.title
