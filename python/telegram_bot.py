@@ -202,6 +202,7 @@ class TelegramBot:
         # Держим ссылку, иначе задачу может собрать GC (см. start()).
         self._warmup_task: "asyncio.Task | None" = None
         self._library_task: "asyncio.Task | None" = None
+        self._bootstrap_running = False
         # chat_id -> list of projects from last search
         self._projects: dict[str, list[dict[str, Any]]] = {}
         # chat_id -> conversation history for free chat
@@ -972,7 +973,17 @@ class TelegramBot:
             return
         if len(library):
             return
+        # Прогрев и ленивый сбор могут стартовать одновременно; два перебора
+        # канала подряд — лишний десяток forward/delete и риск словить лимит.
+        if self._bootstrap_running:
+            return
+        self._bootstrap_running = True
+        try:
+            await self._do_bootstrap()
+        finally:
+            self._bootstrap_running = False
 
+    async def _do_bootstrap(self) -> None:
         if not await self._await_channel_access():
             return
 
