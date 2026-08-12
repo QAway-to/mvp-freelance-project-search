@@ -201,6 +201,7 @@ class TelegramBot:
         self._app: Application | None = None
         # Держим ссылку, иначе задачу может собрать GC (см. start()).
         self._warmup_task: "asyncio.Task | None" = None
+        self._library_task: "asyncio.Task | None" = None
         # chat_id -> list of projects from last search
         self._projects: dict[str, list[dict[str, Any]]] = {}
         # chat_id -> conversation history for free chat
@@ -764,10 +765,33 @@ class TelegramBot:
     # Библиотека роликов (приватный канал)
     # ------------------------------------------------------------------
 
+    def _ensure_library(self) -> None:
+        """Собрать библиотеку по живому трафику, если прогрев её не наполнил.
+
+        Прогрев при запуске конкурирует с поднятием поллинга и переживает не
+        каждый старт. Здесь задача рождается внутри обработчика сообщения —
+        никаких гонок со стартом приложения.
+        """
+        if len(library) or not config.CONTENT_CHANNEL_ID:
+            return
+        if self._library_task and not self._library_task.done():
+            return
+        log_agent_action("Content", "Библиотека пуста — собираю по ходу диалога")
+        self._library_task = asyncio.create_task(self._bootstrap_content())
+        self._library_task.add_done_callback(
+            lambda t: log_agent_action(
+                "Content",
+                f"Сбор библиотеки: {len(library)} роликов"
+                + (f", ошибка {t.exception()!r}" if not t.cancelled() and t.exception() else ""),
+            )
+        )
+
     async def _send_topic_video(self, update: Update, state: UserState, text: str) -> None:
         """Отправить релевантный ролик из канала, если он есть и ещё не показан."""
         if not config.CONTENT_CHANNEL_ID or not self._app:
             return
+
+        self._ensure_library()
 
         item = library.match(text, is_premium=state.is_premium, exclude=state.seen_content)
         if not item:
